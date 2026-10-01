@@ -17,8 +17,8 @@ export const DEFAULT_TRACK = [
 ];
 
 export const DEFAULT_CAT_POSITIONS = [
-  { id: 1, progress: 0.35, name: 'Checkpoint 1' },
-  { id: 2, progress: 0.7, name: 'Checkpoint 2' },
+  { id: 1, progress: 0.55, name: 'Checkpoint 1' },
+  { id: 2, progress: 0.75, name: 'Checkpoint 2' },
   { id: 3, progress: 0.95, name: 'Final Safety Point' },
 ];
 

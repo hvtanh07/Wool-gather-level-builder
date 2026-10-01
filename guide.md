@@ -180,10 +180,36 @@ In `src/utils/colors.ts`, dimensions are calibrated against the real game grid:
 ### 5.3 Playtest Engine (`src/components/PlaytestView.tsx`)
 - **Important Design Pattern**:
   - The game simulation loop runs on a persistent `engineRef` inside `requestAnimationFrame`.
-  - Continuous variables (`dragonProgress`, `woolGatherTimer`, `yarnParticles`, `slottedBoxes`) are updated directly inside the engine loop, **never** in state hooks that trigger component unmount/remount.
-  - React state is used strictly for static UI modals (pause, victory, defeat, progress bar throttling).
-- **Yarn Thread Animation**:
-  - When a docked box matches a dragon segment, an animated quadratic Bezier yarn thread renders connecting the specific segment position to the spool with traveling knot particles.
+  - Continuous variables (`dragonProgress`, `woolGatherTimer`, `yarnParticles`, `slottedBoxes`, `boardZoomScale`, `boardPanOffset`) are updated directly inside the engine loop, **never** in state hooks that trigger component unmount/remount.
+  - React state is used strictly for static UI modals (pause, victory, defeat, progress bar throttling, zoom display percentage).
+- **Pan & Zoom in Playtest View**:
+  - **Scroll to Zoom**: Mouse wheel zoom smoothly scales the board centered around the cursor position (range $0.4\times$ to $3.0\times$).
+  - **Drag to Pan**: Dragging anywhere on the board with left-click pans the view. A drag threshold ($>4$px) cleanly differentiates a pan gesture from a box tap/click ($\le 4$px).
+  - **Middle & Right Click**: Middle-click and right-click drag also pan the camera.
+  - **Keyboard Shortcuts**: `+` / `=` to zoom in, `-` / `_` to zoom out, `0` / `Home` to reset view.
+  - **Floating Zoom Widget (Bottom-Left)**: Sleek HUD buttons for Zoom In (`+`), Zoom Out (`-`), Zoom Percentage indicator (clickable), and Reset Camera (`Maximize2`).
+  - **Fixed HUD & Visual Clipping**: The top road track and spool shelf remain pinned as fixed UI elements while the board area beneath is smoothly panned and zoomed. Boxes are clipped to remain below the shelf boundary.
+  - **Dynamic Cursors**: `cursor-grab` on canvas, `cursor-grabbing` while panning, `cursor-pointer` on clear unblocked boxes, and `cursor-not-allowed` on blocked boxes.
+- **Segment Retrieval & Backward Reconnect Animation**:
+  - When a box docked in a slot matches a dragon section, wool yarn streams from the dragon segment into the spool with animated Bezier threads and traveling particles.
+  - Once the segment's wool is retrieved and the segment is removed from the dragon, the back tail remains anchored at its track position.
+  - The front part of the dragon (from the removed segment forward to the dragon head) rolls **backward** along the track towards the back tail.
+  - While moving backward, forward progress is paused, and the dragon moves away from the cat / checkpoints, providing vital breathing room for the player.
+  - Once the front body connects with the back tail (*snap!* audio feedback and visual connection), the body is fully attached and the dragon resumes crawling forward.
+- **Fog Area & Starting Point Rules**:
+  - **Fog Area (0.0 to 1/3 track progress)**:
+    - Covers the first third of the dragon track ($0.0 \le P \le 1/3$).
+    - Boxes **cannot scan or retrieve** any wool segments or knots while they reside inside this fog area.
+    - Knots inside the fog are rendered translucent ($35\%$ opacity) with a frosted outline and covered in animated drifting mist puffs.
+  - **Starting Point (P = 1/3)**:
+    - The dragon begins the level with its head stationed right at the start gate ($P = 1/3$), with its wool body trailing behind in the fog.
+    - As the dragon crawls forward, sections emerge from the fog across the start gate and become active for gathering.
+    - **Head Boundary Clamping**: When a segment is taken and the dragon head retreats backward, it **cannot go back beyond the starting point**.
+    - **Body Forward Catch-Up**: If the head reaches the starting point ($P = 1/3$), the head clamps in place, and the **body (back tail) moves up/forward along the track to connect with the head**. Once attached, the dragon continues forward.
+  - **Visual Indicators**:
+    - The track features a foggy mist ribbon, animated drifting clouds, and a `🌫️ FOG (LOCKED)` label.
+    - A cyan-and-white checkered finish line and `🚩 START` badge mark the boundary at $P = 1/3$.
+    - The top HUD progress bar displays the fog region ($0\% - 33\%$) and a cyan start line tick.
 
 ### 5.4 Canvas Editor (`src/components/CanvasEditor.tsx`)
 - **Move Box Interaction**:
