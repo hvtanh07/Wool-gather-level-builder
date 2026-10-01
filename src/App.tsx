@@ -186,34 +186,33 @@ function App() {
               onAddBox={handleAddBox}
             />
 
-            {/* Center Area: Canvas & Dragon Timeline */}
-            <div className="flex-1 flex flex-col overflow-hidden relative">
-              {/* Canvas Editor */}
-              <div className="flex-1 relative">
-                <CanvasEditor
-                  boxes={levelData.boxes}
-                  selectedBoxIds={selectedBoxIds}
-                  onSelectBoxes={setSelectedBoxIds}
-                  onUpdateBoxes={updateBoxesWithHistory}
-                  activeColor={activeColor}
-                  activeNumType={activeNumType}
-                  gridSnap={gridSnap}
-                  showRays={showRays}
-                />
-              </div>
-
-              {/* Bottom Dragon Editor Strip */}
-              <DragonEditor
+            {/* Center Area: Full-height Canvas Editor */}
+            <div className="flex-1 relative overflow-hidden">
+              <CanvasEditor
                 boxes={levelData.boxes}
+                selectedBoxIds={selectedBoxIds}
+                onSelectBoxes={setSelectedBoxIds}
+                onUpdateBoxes={updateBoxesWithHistory}
+                activeColor={activeColor}
+                activeNumType={activeNumType}
+                gridSnap={gridSnap}
+                showRays={showRays}
                 dragon={levelData.dragon}
-                slotsCount={levelData.slots.unlockedCount || 4}
-                onUpdateDragon={handleUpdateDragon}
-                onStartPlaytest={() => {
-                  sounds.playWhoosh();
-                  setViewMode('playtest');
-                }}
+                slots={levelData.slots}
               />
             </div>
+
+            {/* Right Sidebar: Dragon Configuration Zone */}
+            <DragonEditor
+              boxes={levelData.boxes}
+              dragon={levelData.dragon}
+              slotsCount={levelData.slots.unlockedCount || 4}
+              onUpdateDragon={handleUpdateDragon}
+              onStartPlaytest={() => {
+                sounds.playWhoosh();
+                setViewMode('playtest');
+              }}
+            />
           </div>
 
           {/* Import/Export Modal */}

@@ -212,6 +212,15 @@ In `src/utils/colors.ts`, dimensions are calibrated against the real game grid:
     - The top HUD progress bar displays the fog region ($0\% - 33\%$) and a cyan start line tick.
 
 ### 5.4 Canvas Editor (`src/components/CanvasEditor.tsx`)
+- **Complete Scene Visualization**:
+  - The canvas editor now visualizes the entire level environment in a unified coordinate space:
+    - **Top ($Z \ge 1.8$)**: Winding Road Track, Fog Area ($0\% - 33\%$), Start Line Gate, Cat Checkpoints, and Dragon wool body & head preview.
+    - **Middle ($Z \approx 0.8$)**: Spool Shelf preview with active and locked slots.
+    - **Bottom ($Z \le 0$)**: Box Play Area with exit rays and oriented bounding boxes.
+  - **Toolbar Controls (Bottom-Left)**:
+    - `Fit Scene` button: Centers camera to encompass both the road track and the box board simultaneously (`pan.y = h * 0.52, zoom = 52`).
+    - `Dragon Track` toggle: Show or hide track and scene overlays.
+    - `Focus Boxes`: Quickly zoom in and center on the box board.
 - **Move Box Interaction**:
   - Dragging updates box coordinates with grid snapping live on the canvas (`onUpdateBoxes(updated, false)`).
   - History snapshots are **only** committed once on `mouseUp` (`onUpdateBoxes(updated, true)`) to prevent history array bloat and eliminate lag.
@@ -229,6 +238,21 @@ In `src/utils/colors.ts`, dimensions are calibrated against the real game grid:
   - Shows real-time badge: `Solvable (X/X)` or `Deadlock (Y Stuck)`.
   - "Show Exit Order" button displays high-contrast obsidian-and-gold badges (`#1`, `#2`...) on the boxes.
   - "Select Stuck" button immediately grabs deadlocked boxes.
+
+### 5.5 Right-Side Dragon Configuration Panel (`src/components/DragonEditor.tsx`)
+- **3-Column Workspace Layout**:
+  - `[Left Sidebar: Box Tools] | [Center: Full-Height Canvas] | [Right Sidebar: Dragon Config Zone]`
+- **Right Sidebar Capabilities**:
+  - **Wool Balance Pill**: Compares total dragon wool vs box wool (`Dragon: X / Boxes: Y`), showing instant match status or difference (`+N excess` / `-N needed`).
+  - **Auto-Generate Solvable Dragon**: 1-click solver generating guaranteed 100% solvable wool sequences under `Easy`, `Normal`, or `Hard` difficulties.
+  - **Collapsible Track & Speed Controls**: Adjust dragon crawl speed (`0.005` to `0.05`), review fog zone bounds, start gate, and cat checkpoints.
+  - **Vertical Wool Timeline (Head to Tail)**:
+    - Numbered cards from `#1 HEAD` to `#N TAIL`.
+    - Real-time swatch with wool color name and unit count adjuster (`-`, number, `+`).
+    - Up / Down reordering buttons and Delete button.
+    - Click any segment to expand the 8-color swatch palette for instant color replacement.
+  - **Collapse / Expand Toggle**: Allows collapsing into a sleek 48px icon strip to maximize canvas space.
+  - **Quick Playtest Action**: Direct launch into Playtest mode.
 
 ---
 
