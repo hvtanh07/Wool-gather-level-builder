@@ -73,7 +73,7 @@ export function convertLegacyLvMapToClean(legacy: LegacyLvMap): CleanLevelData {
     levelType,
     camera,
     slots: {
-      count: 5,
+      count: 4,
       unlockedCount: 4,
     },
     dragon: {

@@ -158,10 +158,13 @@ A minimal, readable JSON format containing only the essential gameplay data:
 }
 ```
 
-### 3.2 Legacy Format Support (`LegacyLvMap`)
+### 3.2 Legacy Format Support (`LegacyLvMap`) & JSON File Import
 The tool includes a built-in bidirectional converter in `src/data/demoLevel.ts`:
 - Converts legacy `lvmap_*.json` files (containing `pos: {x, z}`, `hardColor`, `numType`, `boxType`, `infos`) into `CleanLevelData`.
-- The Import dialog in `ImportExportModal.tsx` automatically detects legacy vs clean format on paste.
+- **JSON File Import Options**:
+  - **Direct Top Navbar Button**: Click `"Open JSON File"` in the top navigation bar to choose any `.json` file from your device and load it immediately into the builder.
+  - **Drag-and-Drop Dropzone in Data Manager Modal**: Open `"JSON Import / Export"` to drag & drop `.json` or `.txt` files directly into the modal, displaying filename, filesize, Level ID, box count, and auto-conversion status.
+  - **Manual Paste & Textarea**: Direct JSON string editing and pasting with auto-format detection.
 
 ---
 
@@ -187,6 +190,17 @@ In `src/utils/colors.ts`, dimensions are calibrated against the real game grid:
 ### 4.3 Slot Configuration
 - Levels default to **at least 4 active slots** (`slots.unlockedCount: 4`).
 - TopNavbar allows toggling 4, 5, 6, or 7 active slots.
+
+### 4.4 Calibrated Wool Color Palette (`src/utils/colors.ts`)
+The 8 official wool color IDs and their hex assignments:
+- `1`: **Red** (`#ef4444`)
+- `2`: **Blue** (`#2563eb`)
+- `3`: **Green** (`#22c55e`)
+- `4`: **Yellow** (`#eab308`)
+- `5`: **Pink** (`#ec4899`)
+- `6`: **Orange** (`#f97316`)
+- `7`: **Purple** (`#9333ea`)
+- `8`: **Cyan** (`#06b6d4`)
 
 ---
 
@@ -223,36 +237,48 @@ In `src/utils/colors.ts`, dimensions are calibrated against the real game grid:
   - **Drag to Pan**: Dragging anywhere on the board with left-click pans the view. A drag threshold ($>4$px) cleanly differentiates a pan gesture from a box tap/click ($\le 4$px).
   - **Middle & Right Click**: Middle-click and right-click drag also pan the camera.
   - **Keyboard Shortcuts**: `+` / `=` to zoom in, `-` / `_` to zoom out, `0` / `Home` to reset view.
-  - **Floating Zoom Widget (Bottom-Left)**: Sleek HUD buttons for Zoom In (`+`), Zoom Out (`-`), Zoom Percentage indicator (clickable), and Reset Camera (`Maximize2`).
-  - **Fixed HUD & Visual Clipping**: The top road track and spool shelf remain pinned as fixed UI elements while the board area beneath is smoothly panned and zoomed. Boxes are clipped to remain below the shelf boundary.
+  - **Floating Zoom Widget (Bottom-Right)**: Sleek HUD buttons for Zoom In (`+`), Zoom Out (`-`), Zoom Percentage indicator (clickable), and Reset Camera (`Maximize2`), anchored over the right-side board area.
+  - **Fixed UI & Visual Clipping**: The left area (road track, dragon, and spool shelf) remains fixed while the board area in the right half is smoothly panned and zoomed. Boxes are strictly clipped to the right half.
   - **Dynamic Cursors**: `cursor-grab` on canvas, `cursor-grabbing` while panning, `cursor-pointer` on clear unblocked boxes, and `cursor-not-allowed` on blocked boxes.
+- **Side-by-Side 50/50 Screen Division**:
+  - **Left Half (0% to 50% Width)**:
+    - Dedicated to the dragon crawl track, Cat checkpoints, and the Spool Shelf (docked bus slots).
+    - Features a soft spring meadow green background (`#f0fdf4` to `#dcfce7`).
+    - The Spool Shelf is anchored across the bottom of the left half (`shelfY = height - 90`), below the track.
+    - Animated Bezier yarn retrieval threads & traveling particles connect dragon segments directly into docked spools within this left area.
+  - **Right Half (50% to 100% Width)**:
+    - Dedicated entirely to the messy box puzzle layout, conveyors, tunnels, and frozen boxes on a warm sand/cream table background (`#fefce8` to `#fef3c7`).
+    - Centered camera (`cx = midX + rightW / 2`, `cy = height / 2`), with smooth zoom and pan controls.
+    - Strictly clipped to the right half (`ctx.rect(midX, 0, rightW, height)`), ensuring panned boxes never cross into the dragon or shelf area.
+    - Interactive hover cursor and box click detection active only when `mouseX >= midX`.
+- **Dragon Wool Visibility & Compact Head**:
+  - **Full Color Visibility Across Entire Track**: All dragon wool segments display in 100% full vibrant color (`col.hex`, `col.lightHex`, `col.darkHex`) with 3D spherical knitted texture along the entire path (no grey desaturation, no opacity fading, no obscuring clouds).
+  - **Compact Non-Overlapping Dragon Head**: Scaled to 10px radius and anchored forward at `(5, 0)` so it leads at the front tip like a cute dragon mask without extending backward over the first segment. The first and all following segments remain 100% visible.
+  - **Start Gate & Boundary Rule**: Checkered cyan-and-white start line across the path at $P = 1/3$. Segments crossing past this line become active for gathering, and dragon head retreats are clamped at this starting point.
 - **Segment Retrieval & Backward Reconnect Animation**:
   - When a box docked in a slot matches a dragon section, wool yarn streams from the dragon segment into the spool with animated Bezier threads and traveling particles.
   - Once the segment's wool is retrieved and the segment is removed from the dragon, the back tail remains anchored at its track position.
   - The front part of the dragon (from the removed segment forward to the dragon head) rolls **backward** along the track towards the back tail.
   - While moving backward, forward progress is paused, and the dragon moves away from the cat / checkpoints, providing vital breathing room for the player.
   - Once the front body connects with the back tail (*snap!* audio feedback and visual connection), the body is fully attached and the dragon resumes crawling forward.
-- **Fog Area & Starting Point Rules**:
-  - **Fog Area (0.0 to 1/3 track progress)**:
-    - Covers the first third of the dragon track ($0.0 \le P \le 1/3$).
-    - Boxes **cannot scan or retrieve** any wool segments or knots while they reside inside this fog area.
-    - Knots inside the fog are rendered translucent ($35\%$ opacity) with a frosted outline and covered in animated drifting mist puffs.
-  - **Starting Point (P = 1/3)**:
-    - The dragon begins the level with its head stationed right at the start gate ($P = 1/3$), with its wool body trailing behind in the fog.
-    - As the dragon crawls forward, sections emerge from the fog across the start gate and become active for gathering.
-    - **Head Boundary Clamping**: When a segment is taken and the dragon head retreats backward, it **cannot go back beyond the starting point**.
-    - **Body Forward Catch-Up**: If the head reaches the starting point ($P = 1/3$), the head clamps in place, and the **body (back tail) moves up/forward along the track to connect with the head**. Once attached, the dragon continues forward.
-  - **Visual Indicators**:
-    - The track features a foggy mist ribbon, animated drifting clouds, and a `🌫️ FOG (LOCKED)` label.
-    - A cyan-and-white checkered finish line and `🚩 START` badge mark the boundary at $P = 1/3$.
-    - The top HUD progress bar displays the fog region ($0\% - 33\%$) and a cyan start line tick.
 
-### 5.4 Canvas Editor (`src/components/CanvasEditor.tsx`)
+### 5.4 Procedural Tight-Fit Layout Generator (`src/utils/layoutGenerator.ts`)
+- **1-Click Procedural Randomization**:
+  - Activated via the **Randomize** button in the Top Navbar (next to Presets) or in the Left Sidebar.
+  - Automatically synthesizes a **49-box near tight-fit puzzle layout** with randomized positions and interlocking geometry, without copying the demo preset.
+- **Key Algorithmic Phases**:
+  1. **Multi-Band Packing**: Sweeps across 8 horizontal row bands with subtle organic $Z$-jitter, packing horizontal and vertical boxes with snug spacing ($\approx 0.065$ gap).
+  2. **Interlocking Geometry**: Randomly chooses horizontal buses (spanning along $X$ within a row) and vertical buses (bridging across rows along $Z$), creating natural jigsaw interlocking patterns and blocking dependencies.
+  3. **Capacity Mix**: Balances `Box4` (40%), `Box6` (35%), and `Box10` (25%).
+  4. **Reverse-Unpeeling Topological Solver**: Rather than assigning random angles that might cause insoluble circular deadlocks, the generator solves exit orientations in reverse from the outer perimeter inward. This guarantees **100% solvability** on every generated layout.
+  5. **Balanced Wool Palette**: Evenly distributes all 8 wool colors across the 49 boxes.
+  6. **Automatic Dragon Synchronization**: When randomized, `autoGenerateDragonSections` immediately computes a matching solvable dragon wool sequence so the level is instantly ready for playtesting.
+
+### 5.5 Canvas Editor (`src/components/CanvasEditor.tsx`)
 - **Complete Scene Visualization**:
   - The canvas editor now visualizes the entire level environment in a unified coordinate space:
     - **Top ($Z \ge 1.8$)**: Winding Road Track, Fog Area ($0\% - 33\%$), Start Line Gate, Cat Checkpoints, and Dragon wool body & head preview.
-    - **Middle ($Z \approx 0.8$)**: Spool Shelf preview with active and locked slots.
-    - **Bottom ($Z \le 0$)**: Box Play Area with exit rays and oriented bounding boxes.
+    - **Bottom ($Z \le 0$)**: Box Play Area with exit rays and oriented bounding boxes. (Spool shelf is exclusively displayed in Playtest mode to keep the design workspace clean and unobstructed).
   - **Toolbar Controls (Bottom-Left)**:
     - `Fit Scene` button: Centers camera to encompass both the road track and the box board simultaneously (`pan.y = h * 0.52, zoom = 52`).
     - `Dragon Track` toggle: Show or hide track and scene overlays.
@@ -275,7 +301,7 @@ In `src/utils/colors.ts`, dimensions are calibrated against the real game grid:
   - "Show Exit Order" button displays high-contrast obsidian-and-gold badges (`#1`, `#2`...) on the boxes.
   - "Select Stuck" button immediately grabs deadlocked boxes.
 
-### 5.5 Right-Side Dragon Configuration Panel (`src/components/DragonEditor.tsx`)
+### 5.6 Right-Side Dragon Configuration Panel (`src/components/DragonEditor.tsx`)
 - **3-Column Workspace Layout**:
   - `[Left Sidebar: Box Tools] | [Center: Full-Height Canvas] | [Right Sidebar: Dragon Config Zone]`
 - **Right Sidebar Capabilities**:
@@ -290,7 +316,7 @@ In `src/utils/colors.ts`, dimensions are calibrated against the real game grid:
   - **Collapse / Expand Toggle**: Allows collapsing into a sleek 48px icon strip to maximize canvas space.
   - **Quick Playtest Action**: Direct launch into Playtest mode.
 
-### 5.6 Advanced Gameplay Elements & Gimmicks
+### 5.7 Advanced Gameplay Elements & Gimmicks
 
 #### 1. Tunnel (Warehouse Dispenser)
 - **Functional Logic**:

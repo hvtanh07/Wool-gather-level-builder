@@ -25,6 +25,7 @@ import {
   ChevronUp,
   ChevronDown,
   Settings,
+  Dices,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -44,6 +45,7 @@ interface SidebarProps {
   setShowRays: (show: boolean) => void;
   onAddBox: (numType: BoxNumType, color: number, boxType?: BoxType) => void;
   onClearBoard?: () => void;
+  onRandomizeLayout?: () => void;
   // Tunnel props
   tunnels?: TunnelSetup[];
   onUpdateTunnels?: (tunnels: TunnelSetup[]) => void;
@@ -90,6 +92,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setShowRays,
   onAddBox,
   onClearBoard,
+  onRandomizeLayout,
   tunnels = [],
   onUpdateTunnels,
   selectedTunnelId,
@@ -1251,6 +1254,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
             />
           </button>
         </div>
+
+        {/* Randomize Layout Button */}
+        {onRandomizeLayout && (
+          <div className="pt-1 border-t border-slate-800/60">
+            <button
+              onClick={onRandomizeLayout}
+              className="w-full py-1.5 bg-indigo-950/40 hover:bg-indigo-900/60 border border-indigo-700/50 hover:border-indigo-500 text-indigo-300 hover:text-white rounded-lg text-xs font-semibold transition flex items-center justify-center gap-1.5 active:scale-95 shadow-sm"
+              title="Generate randomized 49-box tight fit layout (similar to 49-box demo preset)"
+            >
+              <Dices className="w-3.5 h-3.5 text-indigo-300" />
+              <span>Randomize Layout (49)</span>
+            </button>
+          </div>
+        )}
 
         {/* Clear Entire Board Button */}
         {onClearBoard && (

@@ -89,6 +89,8 @@ const FOG_BOUNDARY = 1 / 3;
 // Starting point right below/at the exit of the fog area where the dragon begins.
 // The dragon head cannot move backward beyond this starting point.
 const START_POINT = 1 / 3;
+// Progress step between consecutive dragon wool knots
+const SEG_STEP = 0.012;
 
 export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -218,7 +220,7 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
 
   // Initialize or Reset the game
   const resetGame = useCallback(() => {
-    const maxSlots = Math.max(4, levelData.slots.unlockedCount || 4);
+    const maxSlots = levelData.slots?.unlockedCount ?? levelData.slots?.count ?? 4;
     const initialSlots: (SlottedBox | null)[] = [];
     for (let i = 0; i < maxSlots; i++) {
       initialSlots.push(null);
@@ -277,13 +279,11 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
       const dt = rawDt * engine.gameSpeed;
 
       if (engine.isPlaying && engine.gameState === 'playing') {
-        const segStep = 0.007;
-
         if (engine.reconnectState && engine.reconnectState.isReconnecting) {
           // Reconnect logic:
           // Front moves backward towards tail, but cannot retreat beyond START_POINT.
           // If head reaches START_POINT, the body moves up (forward along track) to connect with head.
-          const reconnectSpeed = 0.14; // track progress per second
+          const reconnectSpeed = 0.16; // track progress per second
           const retractStep = reconnectSpeed * dt;
 
           if (engine.dragonProgress > START_POINT) {
@@ -295,14 +295,14 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
           }
 
           const currentFrontBack =
-            engine.dragonProgress - engine.reconnectState.frontKnots * segStep;
+            engine.dragonProgress - engine.reconnectState.frontKnots * SEG_STEP;
 
           if (currentFrontBack <= engine.reconnectState.tailAnchorProgress) {
             // Body attached! Snap to exact alignment and resume forward crawl
             engine.dragonProgress = Math.max(
               START_POINT,
               engine.reconnectState.tailAnchorProgress +
-                engine.reconnectState.frontKnots * segStep
+                engine.reconnectState.frontKnots * SEG_STEP
             );
             engine.reconnectState = null;
             sounds.playPop(); // Crisp attachment snap sound
@@ -385,12 +385,12 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
               let availableKnots = 0;
               for (let i = 0; i < engine.dragonSections.length; i++) {
                 const sec = engine.dragonSections[i];
-                const secStartP = engine.dragonProgress - runningKnots * segStep;
+                const secStartP = engine.dragonProgress - runningKnots * SEG_STEP;
                 // Cannot scan or take segments inside the fog area (< FOG_BOUNDARY)
                 if (secStartP >= FOG_BOUNDARY && sec.color === sb.color && sec.count > 0) {
                   const emergedInSec = Math.min(
                     sec.count,
-                    Math.floor((secStartP - FOG_BOUNDARY) / segStep) + 1
+                    Math.floor((secStartP - FOG_BOUNDARY) / SEG_STEP) + 1
                   );
                   if (emergedInSec > 0) {
                     matchSectionIdx = i;
@@ -414,8 +414,8 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
                   frontKnots += engine.dragonSections[i].count;
                 }
 
-                const sectionStartProgress = engine.dragonProgress - frontKnots * segStep;
-                const sectionLength = amountToTake * segStep;
+                const sectionStartProgress = engine.dragonProgress - frontKnots * SEG_STEP;
+                const sectionLength = amountToTake * SEG_STEP;
                 const tailAnchorProgress = sectionStartProgress - sectionLength;
 
                 const colDef = getWoolColor(sb.color);
@@ -628,13 +628,15 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
     return () => cancelAnimationFrame(animId);
   }, [levelData, getTrackPointAt]);
 
-  // World to screen mapping for bottom board (accounting for zoom scale and pan offset)
+  // World to screen mapping for right-side board (accounting for zoom scale and pan offset)
   const getBoardTransform = (width: number, height: number) => {
-    const baseZoom = Math.min(width / 9, height / 16);
+    const midX = width * 0.50;
+    const rightW = width - midX;
+    const baseZoom = Math.min((rightW - 40) / 8.5, (height - 60) / 10.0);
     const effectiveZoom = baseZoom * engineRef.current.boardZoomScale;
-    const cx = width / 2 + engineRef.current.boardPanOffset.x;
-    const cy = height * 0.68 + engineRef.current.boardPanOffset.y;
-    return { baseZoom, effectiveZoom, cx, cy };
+    const cx = midX + rightW / 2 + engineRef.current.boardPanOffset.x;
+    const cy = height / 2 + engineRef.current.boardPanOffset.y;
+    return { baseZoom, effectiveZoom, cx, cy, midX, rightW };
   };
 
   const boardToScreen = (
@@ -699,20 +701,22 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
       const nextScale = Math.min(Math.max(prevScale * factor, 0.4), 3.0);
       if (Math.abs(nextScale - prevScale) < 0.001) return;
 
-      const baseZoom = Math.min(width / 9, height / 16);
+      const midX = width * 0.50;
+      const rightW = width - midX;
+      const baseZoom = Math.min((rightW - 40) / 8.5, (height - 60) / 10.0);
       const prevEffectiveZoom = baseZoom * prevScale;
       const nextEffectiveZoom = baseZoom * nextScale;
 
-      const prevCx = width / 2 + engine.boardPanOffset.x;
-      const prevCy = height * 0.68 + engine.boardPanOffset.y;
+      const prevCx = midX + rightW / 2 + engine.boardPanOffset.x;
+      const prevCy = height / 2 + engine.boardPanOffset.y;
 
       // World point under cursor before zoom
       const wx = (screenX - prevCx) / prevEffectiveZoom;
       const wz = -(screenY - prevCy) / prevEffectiveZoom;
 
       // New pan offsets to keep (wx, wz) at the exact same screen position
-      engine.boardPanOffset.x = screenX - width / 2 - wx * nextEffectiveZoom;
-      engine.boardPanOffset.y = screenY - height * 0.68 + wz * nextEffectiveZoom;
+      engine.boardPanOffset.x = screenX - (midX + rightW / 2) - wx * nextEffectiveZoom;
+      engine.boardPanOffset.y = screenY - (height / 2) + wz * nextEffectiveZoom;
       engine.boardZoomScale = nextScale;
 
       setZoomDisplay(Math.round(nextScale * 100));
@@ -733,10 +737,10 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
       if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return;
       if (e.key === '+' || e.key === '=') {
         const canvas = canvasRef.current;
-        if (canvas) zoomAtPoint(1.2, canvas.clientWidth / 2, canvas.clientHeight * 0.68);
+        if (canvas) zoomAtPoint(1.2, canvas.clientWidth * 0.75, canvas.clientHeight / 2);
       } else if (e.key === '-' || e.key === '_') {
         const canvas = canvasRef.current;
-        if (canvas) zoomAtPoint(0.83, canvas.clientWidth / 2, canvas.clientHeight * 0.68);
+        if (canvas) zoomAtPoint(0.83, canvas.clientWidth * 0.75, canvas.clientHeight / 2);
       } else if (e.key === '0' || e.key === 'Home') {
         resetView();
       }
@@ -765,26 +769,66 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
     ctx.save();
     ctx.scale(dpr, dpr);
 
-    // Winter sky gradient background matching the screenshot
-    const skyGrad = ctx.createLinearGradient(0, 0, 0, height);
-    skyGrad.addColorStop(0, '#cce5ff');
-    skyGrad.addColorStop(0.38, '#e6f2ff');
-    skyGrad.addColorStop(0.42, '#93c5fd');
-    skyGrad.addColorStop(1, '#dbeafe');
-    ctx.fillStyle = skyGrad;
-    ctx.fillRect(0, 0, width, height);
+    const midX = width * 0.50;
+    const rightW = width - midX;
 
     // -------------------------------------------------------------
-    // 1. TOP AREA: ROAD TRACK, DRAGON & CAT
+    // LEFT HALF: SOFT MEADOW GREEN (Dragon & Wool Gathering Zone)
+    // -------------------------------------------------------------
+    const leftGrad = ctx.createLinearGradient(0, 0, midX, height);
+    leftGrad.addColorStop(0, '#f0fdf4');
+    leftGrad.addColorStop(1, '#dcfce7');
+    ctx.fillStyle = leftGrad;
+    ctx.fillRect(0, 0, midX, height);
+
+    // -------------------------------------------------------------
+    // RIGHT HALF: WARM CREAM / SAND TABLE (Puzzle Board & Box Mess)
+    // -------------------------------------------------------------
+    const rightGrad = ctx.createLinearGradient(midX, 0, width, height);
+    rightGrad.addColorStop(0, '#fefce8');
+    rightGrad.addColorStop(1, '#fef3c7');
+    ctx.fillStyle = rightGrad;
+    ctx.fillRect(midX, 0, rightW, height);
+
+    // Subtle vertical divider line separating the two halves
+    ctx.beginPath();
+    ctx.moveTo(midX, 0);
+    ctx.lineTo(midX, height);
+    ctx.strokeStyle = 'rgba(217, 119, 6, 0.35)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // -------------------------------------------------------------
+    // 1. LEFT AREA: ROAD TRACK, DRAGON & CAT
     // -------------------------------------------------------------
     const track = levelData.dragon.track;
-    const topAreaZoom = Math.min(width / 9, height / 16);
-    const topCx = width / 2;
-    const topCy = height * 0.18;
+    const shelfY = height - 90;
+
+    let minX = -3.5, maxX = 3.5, minY = 1.8, maxY = 7.2;
+    if (track && track.length > 0) {
+      minX = Math.min(...track.map((p) => p.x));
+      maxX = Math.max(...track.map((p) => p.x));
+      minY = Math.min(...track.map((p) => p.y));
+      maxY = Math.max(...track.map((p) => p.y));
+    }
+    const trackSpanX = Math.max(maxX - minX, 1);
+    const trackSpanY = Math.max(maxY - minY, 1);
+    const trackMidX = (minX + maxX) / 2;
+    const trackMidY = (minY + maxY) / 2;
+
+    const availLeftW = Math.max(120, Math.min(midX - 40, 750));
+    const availLeftH = Math.max(140, shelfY - 50);
+
+    const leftAreaZoom = Math.min(
+      availLeftW / (trackSpanX + 1.2),
+      availLeftH / (trackSpanY + 0.8)
+    );
+    const leftCx = midX / 2;
+    const leftCy = 30 + availLeftH / 2;
 
     const trackToScreen = (wx: number, wy: number) => ({
-      x: topCx + wx * topAreaZoom,
-      y: topCy - (wy - 5.0) * topAreaZoom,
+      x: leftCx + (wx - trackMidX) * leftAreaZoom,
+      y: leftCy - (wy - trackMidY) * leftAreaZoom,
     });
 
     if (track && track.length > 1) {
@@ -797,123 +841,47 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
         ctx.lineTo(pt.x, pt.y);
       }
 
-      ctx.lineWidth = 26;
-      ctx.strokeStyle = 'rgba(148, 163, 184, 0.45)';
+      // Outer Road Curb / Warm Border (matches reference image)
+      ctx.lineWidth = 36;
+      ctx.strokeStyle = '#e2b078';
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.stroke();
 
-      ctx.lineWidth = 20;
-      ctx.strokeStyle = '#cbd5e1';
+      // Warm Sand Road Bed (matches reference image)
+      ctx.lineWidth = 28;
+      ctx.strokeStyle = '#fed7aa';
       ctx.stroke();
 
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+      // Center White Dashed Stitching
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
       ctx.setLineDash([8, 8]);
       ctx.stroke();
       ctx.setLineDash([]);
 
       // -------------------------------------------------------------
-      // 1.1 FOG AREA (First 1/3 of track: progress 0.0 to 1/3)
-      // -------------------------------------------------------------
-      ctx.save();
-      // Fog ribbon along track
-      ctx.beginPath();
-      const fogSteps = 30;
-      for (let i = 0; i <= fogSteps; i++) {
-        const p = (i / fogSteps) * FOG_BOUNDARY;
-        const pt = getTrackPointAt(p);
-        const scr = trackToScreen(pt.x, pt.y);
-        if (i === 0) ctx.moveTo(scr.x, scr.y);
-        else ctx.lineTo(scr.x, scr.y);
-      }
-      ctx.lineWidth = 32;
-      ctx.strokeStyle = 'rgba(203, 213, 225, 0.65)';
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.stroke();
-
-      ctx.lineWidth = 22;
-      ctx.strokeStyle = 'rgba(241, 245, 249, 0.8)';
-      ctx.stroke();
-
-      // Drifting animated mist clouds along fog area
-      const animTime = performance.now() * 0.001;
-      for (let i = 0; i < 5; i++) {
-        const puffP = (i * 0.065 + animTime * 0.015) % FOG_BOUNDARY;
-        const puffPt = getTrackPointAt(puffP);
-        const puffScr = trackToScreen(puffPt.x, puffPt.y);
-        const puffRadius = 14 + Math.sin(animTime * 2.5 + i * 1.5) * 4;
-
-        const puffGrad = ctx.createRadialGradient(
-          puffScr.x,
-          puffScr.y,
-          2,
-          puffScr.x,
-          puffScr.y,
-          puffRadius
-        );
-        puffGrad.addColorStop(0, 'rgba(255, 255, 255, 0.7)');
-        puffGrad.addColorStop(0.6, 'rgba(226, 232, 240, 0.35)');
-        puffGrad.addColorStop(1, 'rgba(226, 232, 240, 0)');
-
-        ctx.fillStyle = puffGrad;
-        ctx.beginPath();
-        ctx.arc(puffScr.x, puffScr.y, puffRadius, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      // Fog Region Badge
-      const fogMidPt = getTrackPointAt(FOG_BOUNDARY * 0.45);
-      const fogMidScr = trackToScreen(fogMidPt.x, fogMidPt.y);
-      const fogPerp = -fogMidPt.angle + Math.PI / 2;
-      ctx.save();
-      ctx.translate(fogMidScr.x + Math.cos(fogPerp) * 24, fogMidScr.y + Math.sin(fogPerp) * 24);
-      ctx.fillStyle = 'rgba(51, 65, 85, 0.88)';
-      ctx.beginPath();
-      ctx.roundRect(-42, -9, 84, 18, 5);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(148, 163, 184, 0.5)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-
-      ctx.fillStyle = '#f8fafc';
-      ctx.font = 'bold 8.5px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('🌫️ FOG (LOCKED)', 0, 0);
-      ctx.restore();
-
-      // -------------------------------------------------------------
-      // 1.2 START POINT GATE & LINE (At progress = 1/3)
-      // Dragon starts here and cannot retreat back into the fog area
+      // 1.1 START POINT / ACTIVE BOUNDARY LINE (At progress = 1/3)
+      // Dragon starts here; boxes gather segments that cross this line
       // -------------------------------------------------------------
       const startPt = getTrackPointAt(START_POINT);
       const startScr = trackToScreen(startPt.x, startPt.y);
       const perpAngle = -startPt.angle + Math.PI / 2;
-      const gateWidth = 16;
+      const gateWidth = 18;
       const gX1 = startScr.x + Math.cos(perpAngle) * gateWidth;
       const gY1 = startScr.y + Math.sin(perpAngle) * gateWidth;
       const gX2 = startScr.x - Math.cos(perpAngle) * gateWidth;
       const gY2 = startScr.y - Math.sin(perpAngle) * gateWidth;
 
-      // Start line glow
+      // Start line cyan bar
       ctx.beginPath();
       ctx.moveTo(gX1, gY1);
       ctx.lineTo(gX2, gY2);
-      ctx.lineWidth = 6;
-      ctx.strokeStyle = 'rgba(6, 182, 212, 0.4)';
-      ctx.stroke();
-
-      // Start line crisp cyan bar
-      ctx.beginPath();
-      ctx.moveTo(gX1, gY1);
-      ctx.lineTo(gX2, gY2);
-      ctx.lineWidth = 3;
+      ctx.lineWidth = 3.5;
       ctx.strokeStyle = '#06b6d4';
       ctx.stroke();
 
-      // Start line checkered dashed core
+      // Checkered core
       ctx.beginPath();
       ctx.moveTo(gX1, gY1);
       ctx.lineTo(gX2, gY2);
@@ -923,27 +891,27 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Start Point Flag Badge
+      // Start Point Flag Pin
       ctx.save();
-      ctx.translate(startScr.x + Math.cos(perpAngle) * 26, startScr.y + Math.sin(perpAngle) * 26);
+      ctx.translate(startScr.x + Math.cos(perpAngle) * 22, startScr.y + Math.sin(perpAngle) * 22);
       ctx.fillStyle = '#0f172a';
       ctx.beginPath();
-      ctx.roundRect(-24, -9, 48, 18, 5);
+      ctx.roundRect(-22, -8, 44, 16, 4);
       ctx.fill();
       ctx.strokeStyle = '#06b6d4';
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = 1;
       ctx.stroke();
 
       ctx.fillStyle = '#38bdf8';
-      ctx.font = 'bold 9px sans-serif';
+      ctx.font = 'bold 8.5px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText('🚩 START', 0, 0);
       ctx.restore();
 
-      ctx.restore();
-
-      // Draw Cat sitting at current checkpoint
+      // -------------------------------------------------------------
+      // 1.2 CAT SITTING AT CURRENT CHECKPOINT
+      // -------------------------------------------------------------
       const catPositions = levelData.dragon.catPositions;
       if (catPositions && engine.catIndex < catPositions.length) {
         const catTarget = catPositions[engine.catIndex];
@@ -952,18 +920,18 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
 
         ctx.save();
         const hopOffset =
-          engine.catHopAnim > 0 ? Math.sin(engine.catHopAnim * Math.PI) * 22 : 0;
+          engine.catHopAnim > 0 ? Math.sin(engine.catHopAnim * Math.PI) * 24 : 0;
         ctx.translate(catScreen.x, catScreen.y - hopOffset);
 
         // Cat Shadow
         ctx.beginPath();
-        ctx.ellipse(0, 10, 12, 5, 0, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+        ctx.ellipse(0, 12, 14, 5, 0, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
         ctx.fill();
 
         // Cat Body
         ctx.beginPath();
-        ctx.arc(0, 0, 12, 0, Math.PI * 2);
+        ctx.arc(0, 0, 14, 0, Math.PI * 2);
         ctx.fillStyle = '#f59e0b';
         ctx.fill();
         ctx.lineWidth = 1.5;
@@ -972,198 +940,239 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
 
         // Ears
         ctx.beginPath();
-        ctx.moveTo(-9, -8);
-        ctx.lineTo(-4, -18);
-        ctx.lineTo(0, -10);
-        ctx.fillStyle = '#d97706';
-        ctx.fill();
+        ctx.moveTo(-10, -9); ctx.lineTo(-6, -20); ctx.lineTo(-1, -12);
+        ctx.fillStyle = '#d97706'; ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(-8, -10); ctx.lineTo(-6, -17); ctx.lineTo(-3, -12);
+        ctx.fillStyle = '#f472b6'; ctx.fill();
 
         ctx.beginPath();
-        ctx.moveTo(9, -8);
-        ctx.lineTo(4, -18);
-        ctx.lineTo(0, -10);
-        ctx.fillStyle = '#d97706';
-        ctx.fill();
+        ctx.moveTo(10, -9); ctx.lineTo(6, -20); ctx.lineTo(1, -12);
+        ctx.fillStyle = '#d97706'; ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(8, -10); ctx.lineTo(6, -17); ctx.lineTo(3, -12);
+        ctx.fillStyle = '#f472b6'; ctx.fill();
 
         // Eyes & Nose
         ctx.fillStyle = '#0f172a';
         ctx.beginPath();
-        ctx.arc(-4, -2, 2, 0, Math.PI * 2);
-        ctx.arc(4, -2, 2, 0, Math.PI * 2);
+        ctx.arc(-4.5, -2, 2, 0, Math.PI * 2);
+        ctx.arc(4.5, -2, 2, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.fillStyle = '#ec4899';
         ctx.beginPath();
-        ctx.arc(0, 2, 1.5, 0, Math.PI * 2);
+        ctx.arc(0, 2.5, 1.8, 0, Math.PI * 2);
         ctx.fill();
-
-        ctx.fillStyle = '#1e293b';
-        ctx.font = 'bold 9px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(`CAT (${engine.catIndex + 1}/${catPositions.length})`, 0, -22);
 
         ctx.restore();
       }
 
-      // Draw Dragon Wool Body along track
+      // -------------------------------------------------------------
+      // 1.3 DRAGON WOOL BODY (FULL VIBRANT COLOR EVERYWHERE!)
+      // -------------------------------------------------------------
       const headPt = getTrackPointAt(engine.dragonProgress);
       const headScreen = trackToScreen(headPt.x, headPt.y);
 
-      const segStep = 0.007;
+      const activeColors = new Set(
+        Array.from(engine.activeConnections.values()).map((c) => c.colorHex)
+      );
+
+      // Render knots for a section with 100% full vibrant color
+      const renderSectionKnots = (
+        sec: DragonSection,
+        startProgress: number
+      ): number => {
+        const col = getWoolColor(sec.color);
+        const knotCount = Math.min(sec.count, 25);
+        const knotRadius = 12;
+        const isSectionGathering = activeColors.has(col.hex);
+
+        let currP = startProgress;
+
+        for (let k = 0; k < knotCount; k++) {
+          currP -= SEG_STEP;
+          if (currP < 0) break;
+          const kPt = getTrackPointAt(currP);
+          const kScr = trackToScreen(kPt.x, kPt.y);
+
+          ctx.save();
+          // Always 100% full vibrant color along the entire track
+          ctx.globalAlpha = 1.0;
+
+          // Shadow under knot
+          ctx.beginPath();
+          ctx.arc(kScr.x, kScr.y + 1, knotRadius, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
+          ctx.fill();
+
+          // Main 3D Spherical Wool Knot in full vibrant color
+          ctx.beginPath();
+          ctx.arc(kScr.x, kScr.y, knotRadius, 0, Math.PI * 2);
+          const grad = ctx.createRadialGradient(
+            kScr.x - 3,
+            kScr.y - 3,
+            1.5,
+            kScr.x,
+            kScr.y,
+            knotRadius
+          );
+          grad.addColorStop(0, col.lightHex);
+          grad.addColorStop(0.55, col.hex);
+          grad.addColorStop(1, col.darkHex);
+          ctx.fillStyle = grad;
+          ctx.fill();
+
+          // Knitted yarn looping rib arc
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.arc(kScr.x - 1.5, kScr.y - 1.5, knotRadius * 0.55, -0.6, Math.PI * 0.7);
+          ctx.stroke();
+
+          // Crisp outline
+          ctx.strokeStyle = col.darkHex;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+
+          // Active gathering pulse glow
+          if (isSectionGathering) {
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+            ctx.lineWidth = 2.5;
+            ctx.stroke();
+          }
+
+          ctx.restore();
+        }
+
+        return currP;
+      };
 
       ctx.save();
 
       if (engine.reconnectState && engine.reconnectState.isReconnecting) {
         const { cutIndex, tailAnchorProgress } = engine.reconnectState;
 
-        // 1. Draw Front Sections (from Head backwards towards the gap)
+        // 1. Draw Front Sections (from Head backwards)
         let frontProgress = engine.dragonProgress;
         for (let s = 0; s < cutIndex; s++) {
-          const section = engine.dragonSections[s];
-          const col = getWoolColor(section.color);
-          const knotCount = Math.min(section.count, 25);
-
-          for (let k = 0; k < knotCount; k++) {
-            frontProgress -= segStep;
-            if (frontProgress < 0) break;
-            const knotPt = getTrackPointAt(frontProgress);
-            const knotScreen = trackToScreen(knotPt.x, knotPt.y);
-
-            const inFog = frontProgress < FOG_BOUNDARY;
-            ctx.globalAlpha = inFog ? 0.35 : 1.0;
-            ctx.beginPath();
-            ctx.arc(knotScreen.x, knotScreen.y, 8, 0, Math.PI * 2);
-            ctx.fillStyle = col.hex;
-            ctx.fill();
-            ctx.strokeStyle = inFog ? 'rgba(255, 255, 255, 0.7)' : col.darkHex;
-            ctx.lineWidth = inFog ? 1.5 : 1;
-            ctx.stroke();
-            ctx.globalAlpha = 1.0;
-          }
+          frontProgress = renderSectionKnots(engine.dragonSections[s], frontProgress);
           if (frontProgress < 0) break;
         }
 
         // 2. Draw Tail Sections (anchored at tailAnchorProgress)
         let tailProgress = tailAnchorProgress;
         for (let s = cutIndex; s < engine.dragonSections.length; s++) {
-          const section = engine.dragonSections[s];
-          const col = getWoolColor(section.color);
-          const knotCount = Math.min(section.count, 25);
-
-          for (let k = 0; k < knotCount; k++) {
-            tailProgress -= segStep;
-            if (tailProgress < 0) break;
-            const knotPt = getTrackPointAt(tailProgress);
-            const knotScreen = trackToScreen(knotPt.x, knotPt.y);
-
-            const inFog = tailProgress < FOG_BOUNDARY;
-            ctx.globalAlpha = inFog ? 0.35 : 1.0;
-            ctx.beginPath();
-            ctx.arc(knotScreen.x, knotScreen.y, 8, 0, Math.PI * 2);
-            ctx.fillStyle = col.hex;
-            ctx.fill();
-            ctx.strokeStyle = inFog ? 'rgba(255, 255, 255, 0.7)' : col.darkHex;
-            ctx.lineWidth = inFog ? 1.5 : 1;
-            ctx.stroke();
-            ctx.globalAlpha = 1.0;
-          }
+          tailProgress = renderSectionKnots(engine.dragonSections[s], tailProgress);
           if (tailProgress < 0) break;
         }
       } else {
         // Continuous single dragon body
         let currentSegProgress = engine.dragonProgress;
         for (const section of engine.dragonSections) {
-          const col = getWoolColor(section.color);
-          const knotCount = Math.min(section.count, 25);
-
-          for (let k = 0; k < knotCount; k++) {
-            currentSegProgress -= segStep;
-            if (currentSegProgress < 0) break;
-
-            const knotPt = getTrackPointAt(currentSegProgress);
-            const knotScreen = trackToScreen(knotPt.x, knotPt.y);
-
-            // Knitted segment
-            const inFog = currentSegProgress < FOG_BOUNDARY;
-            ctx.globalAlpha = inFog ? 0.35 : 1.0;
-            ctx.beginPath();
-            ctx.arc(knotScreen.x, knotScreen.y, 8, 0, Math.PI * 2);
-            ctx.fillStyle = col.hex;
-            ctx.fill();
-            ctx.strokeStyle = inFog ? 'rgba(255, 255, 255, 0.7)' : col.darkHex;
-            ctx.lineWidth = inFog ? 1.5 : 1;
-            ctx.stroke();
-            ctx.globalAlpha = 1.0;
-          }
+          currentSegProgress = renderSectionKnots(section, currentSegProgress);
           if (currentSegProgress < 0) break;
         }
       }
 
-      // Draw Dragon Head
+      // -------------------------------------------------------------
+      // 1.4 COMPACT DRAGON HEAD (Small, sits at front tip, does NOT cover segments)
+      // -------------------------------------------------------------
+      ctx.save();
       ctx.translate(headScreen.x, headScreen.y);
       ctx.rotate(-headPt.angle);
 
-      // Dragon Head Shadow
+      // Head Body centered forward at (5, 0) with small 10px radius
+      // Back edge is at -5px, completely clearing the first segment behind it!
       ctx.beginPath();
-      ctx.ellipse(0, 6, 14, 6, 0, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
-      ctx.fill();
-
-      // Dragon Head
-      ctx.beginPath();
-      ctx.arc(4, 0, 13, 0, Math.PI * 2);
+      ctx.arc(5, 0, 10, 0, Math.PI * 2);
       ctx.fillStyle = '#f97316';
       ctx.fill();
       ctx.strokeStyle = '#c2410c';
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 1.5;
       ctx.stroke();
 
-      // Horns
+      // Small golden horns angled forward/upward (does NOT extend backward over segments!)
       ctx.beginPath();
-      ctx.moveTo(-4, -10);
-      ctx.lineTo(-12, -18);
-      ctx.lineTo(-2, -12);
-      ctx.fillStyle = '#eab308';
+      ctx.moveTo(2, -7);
+      ctx.lineTo(7, -13);
+      ctx.lineTo(8, -6);
+      ctx.fillStyle = '#facc15';
       ctx.fill();
+      ctx.strokeStyle = '#ca8a04';
+      ctx.lineWidth = 1;
+      ctx.stroke();
 
       ctx.beginPath();
-      ctx.moveTo(-4, 10);
-      ctx.lineTo(-12, 18);
-      ctx.lineTo(-2, 12);
-      ctx.fillStyle = '#eab308';
+      ctx.moveTo(2, 7);
+      ctx.lineTo(7, 13);
+      ctx.lineTo(8, 6);
+      ctx.fillStyle = '#facc15';
+      ctx.fill();
+      ctx.strokeStyle = '#ca8a04';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Small cute snout at (12, 0)
+      ctx.beginPath();
+      ctx.arc(12, 0, 5, 0, Math.PI * 2);
+      ctx.fillStyle = '#fb923c';
+      ctx.fill();
+      ctx.strokeStyle = '#c2410c';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Nostrils
+      ctx.fillStyle = '#7c2d12';
+      ctx.beginPath();
+      ctx.arc(14, -1.8, 1.2, 0, Math.PI * 2);
+      ctx.arc(14, 1.8, 1.2, 0, Math.PI * 2);
       ctx.fill();
 
-      // Eyes
+      // Expressive eyes at (6, -3.5) and (6, 3.5)
       ctx.beginPath();
-      ctx.arc(8, -5, 3.5, 0, Math.PI * 2);
-      ctx.arc(8, 5, 3.5, 0, Math.PI * 2);
+      ctx.arc(6, -3.5, 2.8, 0, Math.PI * 2);
+      ctx.arc(6, 3.5, 2.8, 0, Math.PI * 2);
       ctx.fillStyle = '#ffffff';
       ctx.fill();
       ctx.beginPath();
-      ctx.arc(9, -5, 2, 0, Math.PI * 2);
-      ctx.arc(9, 5, 2, 0, Math.PI * 2);
+      ctx.arc(6.8, -3.5, 1.8, 0, Math.PI * 2);
+      ctx.arc(6.8, 3.5, 1.8, 0, Math.PI * 2);
       ctx.fillStyle = '#0f172a';
       ctx.fill();
+      // Sparkles
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(7.2, -4.2, 0.8, 0, Math.PI * 2);
+      ctx.arc(7.2, 2.8, 0.8, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Cute blush cheeks
+      ctx.fillStyle = 'rgba(236, 72, 153, 0.45)';
+      ctx.beginPath();
+      ctx.arc(4, -8, 2.5, 0, Math.PI * 2);
+      ctx.arc(4, 8, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
 
       ctx.restore();
     }
 
     // -------------------------------------------------------------
-    // 2. MIDDLE AREA: SPOOL SHELF & SLOTS
+    // 2. SPOOL SHELF & SLOTS (Stationed at bottom of left half)
     // -------------------------------------------------------------
-    const shelfY = height * 0.38;
-    const unlockedCount = Math.max(4, levelData.slots.unlockedCount || 4);
-    const slotCount = Math.max(unlockedCount + 1, levelData.slots.count || 5);
-    const slotW = Math.min(width / (slotCount + 1), 84);
-    const slotSpacing = slotW + 12;
-    const shelfStartX = (width - (slotCount * slotSpacing - 12)) / 2;
+    const slotCount = levelData.slots?.unlockedCount ?? levelData.slots?.count ?? 4;
+    const slotW = Math.min((midX - 36) / (slotCount + 1), 72);
+    const slotSpacing = slotW + 10;
+    const shelfStartX = (midX - (slotCount * slotSpacing - 10)) / 2;
 
     // Shelf container bar
-    ctx.fillStyle = 'rgba(219, 234, 254, 0.9)';
-    ctx.strokeStyle = 'rgba(147, 197, 253, 0.8)';
-    ctx.lineWidth = 2;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.88)';
+    ctx.strokeStyle = 'rgba(180, 83, 9, 0.25)';
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.roundRect(shelfStartX - 14, shelfY - 10, slotCount * slotSpacing + 16, 68, 14);
+    ctx.roundRect(shelfStartX - 12, shelfY - 8, slotCount * slotSpacing + 14, 60, 14);
     ctx.fill();
     ctx.stroke();
 
@@ -1172,28 +1181,19 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
     // Render Slots & Docked Boxes
     for (let s = 0; s < slotCount; s++) {
       const sx = shelfStartX + s * slotSpacing + slotW / 2;
-      const sy = shelfY + 24;
+      const sy = shelfY + 22;
       slotScreenPositions.push({ x: sx, y: sy });
 
-      const isUnlocked = s < unlockedCount;
       const slotted = engine.slottedBoxes[s];
 
       // Well background
       ctx.beginPath();
-      ctx.roundRect(sx - slotW / 2, sy - 24, slotW, 48, 10);
-      ctx.fillStyle = isUnlocked ? 'rgba(191, 219, 254, 0.6)' : 'rgba(148, 163, 184, 0.35)';
+      ctx.roundRect(sx - slotW / 2, sy - 21, slotW, 42, 10);
+      ctx.fillStyle = 'rgba(254, 243, 199, 0.7)';
       ctx.fill();
-      ctx.strokeStyle = isUnlocked ? '#93c5fd' : '#94a3b8';
+      ctx.strokeStyle = '#fcd34d';
       ctx.lineWidth = 1.5;
       ctx.stroke();
-
-      if (!isUnlocked) {
-        ctx.fillStyle = '#64748b';
-        ctx.font = 'bold 11px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('Locked', sx, sy + 4);
-        continue;
-      }
 
       if (slotted) {
         // Position during flight or departure
@@ -1221,19 +1221,19 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
         ctx.scale(scale, scale);
 
         // Spool flange ends (left and right caps)
-        const spoolW = slotW - 14;
-        const spoolH = 34;
+        const spoolW = slotW - 12;
+        const spoolH = 30;
 
         ctx.fillStyle = col.darkHex;
         ctx.beginPath();
-        ctx.roundRect(-spoolW / 2, -spoolH / 2, 6, spoolH, 3);
-        ctx.roundRect(spoolW / 2 - 6, -spoolH / 2, 6, spoolH, 3);
+        ctx.roundRect(-spoolW / 2, -spoolH / 2, 5, spoolH, 3);
+        ctx.roundRect(spoolW / 2 - 5, -spoolH / 2, 5, spoolH, 3);
         ctx.fill();
 
         // Wool winding cylinder in center
         ctx.fillStyle = col.hex;
         ctx.beginPath();
-        ctx.roundRect(-spoolW / 2 + 5, -spoolH / 2 + 3, spoolW - 10, spoolH - 6, 4);
+        ctx.roundRect(-spoolW / 2 + 4, -spoolH / 2 + 3, spoolW - 8, spoolH - 6, 4);
         ctx.fill();
 
         // Progress text (e.g. "3 / 6")
@@ -1247,7 +1247,7 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
 
         ctx.restore();
       } else {
-        ctx.fillStyle = 'rgba(100, 116, 139, 0.5)';
+        ctx.fillStyle = 'rgba(100, 116, 139, 0.45)';
         ctx.font = '10px sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText('EMPTY', sx, sy + 3);
@@ -1264,14 +1264,12 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
 
       ctx.beginPath();
       ctx.moveTo(startPt.x, startPt.y);
-      const midX = (startPt.x + endPt.x) / 2;
-      const midY = (startPt.y + endPt.y) / 2 + 25;
-      ctx.quadraticCurveTo(midX, midY, endPt.x, endPt.y);
+      const threadMidX = (startPt.x + endPt.x) / 2;
+      const threadMidY = (startPt.y + endPt.y) / 2 + 15;
+      ctx.quadraticCurveTo(threadMidX, threadMidY, endPt.x, endPt.y);
       ctx.strokeStyle = conn.colorHex;
-      ctx.lineWidth = 3;
-      ctx.setLineDash([4, 2]);
+      ctx.lineWidth = 3.5;
       ctx.stroke();
-      ctx.setLineDash([]);
     });
 
     // Draw traveling wool particles along the curve
@@ -1280,16 +1278,15 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
       if (p.slotIndex >= slotScreenPositions.length) return;
       const startPt = trackToScreen(p.startPos.x, p.startPos.y);
       const endPt = slotScreenPositions[p.slotIndex];
-      const midX = (startPt.x + endPt.x) / 2;
-      const midY = (startPt.y + endPt.y) / 2 + 25;
+      const threadMidX = (startPt.x + endPt.x) / 2;
+      const threadMidY = (startPt.y + endPt.y) / 2 + 15;
 
       const t = p.t;
-      // Quadratic Bezier interpolation: B(t) = (1-t)^2 P0 + 2(1-t)t P1 + t^2 P2
-      const px = (1 - t) * (1 - t) * startPt.x + 2 * (1 - t) * t * midX + t * t * endPt.x;
-      const py = (1 - t) * (1 - t) * startPt.y + 2 * (1 - t) * t * midY + t * t * endPt.y;
+      const px = (1 - t) * (1 - t) * startPt.x + 2 * (1 - t) * t * threadMidX + t * t * endPt.x;
+      const py = (1 - t) * (1 - t) * startPt.y + 2 * (1 - t) * t * threadMidY + t * t * endPt.y;
 
       ctx.beginPath();
-      ctx.arc(px, py, 4, 0, Math.PI * 2);
+      ctx.arc(px, py, 4.5, 0, Math.PI * 2);
       ctx.fillStyle = p.colorHex;
       ctx.fill();
       ctx.strokeStyle = '#ffffff';
@@ -1298,14 +1295,13 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
     });
 
     // -------------------------------------------------------------
-    // 4. BOTTOM AREA: THE MESS OF BOXES
+    // 4. RIGHT AREA: THE MESS OF BOXES (Strictly clipped to right half)
     // -------------------------------------------------------------
     const { effectiveZoom } = getBoardTransform(width, height);
 
-    // Save context and clip to area below shelf so panned boxes do not overlap spools or dragon track
     ctx.save();
     ctx.beginPath();
-    ctx.rect(0, shelfY + 62, width, Math.max(10, height - (shelfY + 62)));
+    ctx.rect(midX, 0, rightW, height);
     ctx.clip();
 
     // Board reference area
@@ -1967,7 +1963,7 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
     const mouseY = e.clientY - rect.top;
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
-    const shelfY = height * 0.38;
+    const midX = width * 0.50;
 
     const ptr = pointerStateRef.current;
     if (ptr.isDown) {
@@ -1984,8 +1980,8 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
       }
     }
 
-    // Hover detection over board boxes
-    if (mouseY > shelfY + 50) {
+    // Hover detection over board boxes (only in right half)
+    if (mouseX >= midX) {
       const { x: wx, z: wz } = screenToBoard(mouseX, mouseY, width, height);
       const box = findBoardBoxAt(wx, wz, engineRef.current.boardBoxes);
       if (box) {
@@ -2034,10 +2030,10 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
     if (!canvas) return;
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
-    const shelfY = height * 0.38;
+    const midX = width * 0.50;
 
-    // Ignore clicks on dragon track or spool shelf
-    if (mouseY < shelfY + 50) return;
+    // Ignore clicks on dragon track or spool shelf in left half
+    if (mouseX < midX) return;
 
     // Screen to World for board area
     const { x: wx, z: wz } = screenToBoard(mouseX, mouseY, width, height);
@@ -2422,55 +2418,57 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
           }`}
         />
 
-        {/* Floating Pan & Zoom HUD (Bottom-Left) */}
-        <div className="absolute bottom-4 left-4 z-20 flex items-center gap-1.5 bg-slate-900/90 border border-slate-700/80 px-2 py-1.5 rounded-xl shadow-xl backdrop-blur-md">
-          <button
-            onClick={() => {
-              const canvas = canvasRef.current;
-              if (!canvas) return;
-              zoomAtPoint(1.2, canvas.clientWidth / 2, canvas.clientHeight * 0.68);
-            }}
-            className="p-1 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg transition"
-            title="Zoom In (+)"
-          >
-            <ZoomIn className="w-4 h-4" />
-          </button>
+        {/* Floating Pan & Zoom HUD (Bottom-Right, over the Board Area) */}
+        <div className="absolute bottom-4 right-4 z-20 flex items-center gap-2">
+          <div className="flex items-center gap-1.5 bg-slate-900/90 border border-slate-700/80 px-2 py-1.5 rounded-xl shadow-xl backdrop-blur-md">
+            <button
+              onClick={() => {
+                const canvas = canvasRef.current;
+                if (!canvas) return;
+                zoomAtPoint(1.2, canvas.clientWidth * 0.75, canvas.clientHeight / 2);
+              }}
+              className="p-1 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg transition"
+              title="Zoom In (+)"
+            >
+              <ZoomIn className="w-4 h-4" />
+            </button>
 
-          <button
-            onClick={resetView}
-            className="px-1.5 py-0.5 hover:bg-slate-800 text-slate-300 hover:text-amber-400 font-mono text-xs font-semibold rounded transition"
-            title="Click to Reset View (100%)"
-          >
-            {zoomDisplay}%
-          </button>
+            <button
+              onClick={resetView}
+              className="px-1.5 py-0.5 hover:bg-slate-800 text-slate-300 hover:text-amber-400 font-mono text-xs font-semibold rounded transition"
+              title="Click to Reset View (100%)"
+            >
+              {zoomDisplay}%
+            </button>
 
-          <button
-            onClick={() => {
-              const canvas = canvasRef.current;
-              if (!canvas) return;
-              zoomAtPoint(0.83, canvas.clientWidth / 2, canvas.clientHeight * 0.68);
-            }}
-            className="p-1 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg transition"
-            title="Zoom Out (-)"
-          >
-            <ZoomOut className="w-4 h-4" />
-          </button>
+            <button
+              onClick={() => {
+                const canvas = canvasRef.current;
+                if (!canvas) return;
+                zoomAtPoint(0.83, canvas.clientWidth * 0.75, canvas.clientHeight / 2);
+              }}
+              className="p-1 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg transition"
+              title="Zoom Out (-)"
+            >
+              <ZoomOut className="w-4 h-4" />
+            </button>
 
-          <div className="w-px h-4 bg-slate-700 mx-0.5" />
+            <div className="w-px h-4 bg-slate-700 mx-0.5" />
 
-          <button
-            onClick={resetView}
-            className="p-1 hover:bg-slate-800 text-slate-400 hover:text-cyan-400 rounded-lg transition"
-            title="Reset Camera (Center & 100%)"
-          >
-            <Maximize2 className="w-3.5 h-3.5" />
-          </button>
-        </div>
+            <button
+              onClick={resetView}
+              className="p-1 hover:bg-slate-800 text-slate-400 hover:text-cyan-400 rounded-lg transition"
+              title="Reset Camera (Center & 100%)"
+            >
+              <Maximize2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
 
-        {/* Floating Pan & Zoom Hint (Bottom-Right) */}
-        <div className="absolute bottom-4 right-4 z-20 hidden sm:flex items-center gap-2 bg-slate-900/80 border border-slate-800 px-3 py-1.5 rounded-xl shadow-lg backdrop-blur-sm text-[11px] text-slate-400">
-          <span className="inline-block w-2 h-2 rounded-full bg-cyan-400/80 animate-pulse" />
-          <span>Drag empty area to pan • Scroll to zoom</span>
+          {/* Floating Pan & Zoom Hint */}
+          <div className="hidden sm:flex items-center gap-2 bg-slate-900/80 border border-slate-800 px-3 py-1.5 rounded-xl shadow-lg backdrop-blur-sm text-[11px] text-slate-400">
+            <span className="inline-block w-2 h-2 rounded-full bg-cyan-400/80 animate-pulse" />
+            <span>Drag empty area to pan • Scroll to zoom</span>
+          </div>
         </div>
 
         {/* Victory Overlay Modal */}

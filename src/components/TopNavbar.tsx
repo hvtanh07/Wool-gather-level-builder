@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { CleanLevelData, LevelType } from '../types/level';
 import { sounds } from '../utils/audio';
+import { parseLevelJson } from './ImportExportModal';
 import {
   Play,
   Download,
@@ -14,6 +15,8 @@ import {
   Volume2,
   VolumeX,
   Trash2,
+  FolderOpen,
+  Dices,
 } from 'lucide-react';
 
 interface TopNavbarProps {
@@ -23,6 +26,8 @@ interface TopNavbarProps {
   onOpenImportExport: () => void;
   onLoadPreset: (presetName: string) => void;
   onClearBoard?: () => void;
+  onImportLevel?: (data: CleanLevelData) => void;
+  onRandomizeLayout?: () => void;
 }
 
 export const TopNavbar: React.FC<TopNavbarProps> = ({
@@ -32,8 +37,33 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
   onOpenImportExport,
   onLoadPreset,
   onClearBoard,
+  onImportLevel,
+  onRandomizeLayout,
 }) => {
   const [soundOn, setSoundOn] = React.useState(true);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleDirectFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      if (!text) return;
+      try {
+        const clean = parseLevelJson(text);
+        if (onImportLevel) {
+          onImportLevel(clean);
+          sounds.playBoxComplete();
+        }
+      } catch (err: unknown) {
+        sounds.playBlocked();
+        alert(`Could not import JSON file: ${err instanceof Error ? err.message : 'Invalid format'}`);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
 
   return (
     <header className="h-14 bg-slate-950 border-b border-slate-800 px-4 flex items-center justify-between text-slate-200 select-none z-30 shadow-md">
@@ -111,6 +141,18 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
             <option value="empty">Blank Canvas (New Level)</option>
           </select>
         </div>
+
+        {/* Randomize Layout Button */}
+        {onRandomizeLayout && (
+          <button
+            onClick={onRandomizeLayout}
+            className="flex items-center gap-1.5 px-2.5 py-1 bg-gradient-to-r from-purple-600/80 to-indigo-600/80 hover:from-purple-500 hover:to-indigo-500 text-white rounded-lg text-xs font-semibold shadow-sm transition active:scale-95 border border-purple-500/40"
+            title="Generate randomized 49-box tight fit layout (similar to 49-box demo level)"
+          >
+            <Dices className="w-3.5 h-3.5 text-purple-200" />
+            <span>Randomize</span>
+          </button>
+        )}
       </div>
 
       {/* Center: Camera & Slots Controls */}
@@ -139,20 +181,22 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
           <Layers className="w-3.5 h-3.5 text-slate-400" />
           <span className="text-[11px] text-slate-400">Slots:</span>
           <select
-            value={levelData.slots.unlockedCount}
+            value={levelData.slots?.unlockedCount ?? levelData.slots?.count ?? 4}
             onChange={(e) => {
               const count = parseInt(e.target.value, 10);
               onUpdateLevelData((prev) => ({
                 ...prev,
-                slots: { count: count + 1, unlockedCount: count },
+                slots: { count: count, unlockedCount: count },
               }));
             }}
             className="bg-transparent text-xs font-mono text-cyan-400 focus:outline-none cursor-pointer"
           >
-            <option value={4} className="bg-slate-900">4 Active Slots</option>
-            <option value={5} className="bg-slate-900">5 Active Slots</option>
-            <option value={6} className="bg-slate-900">6 Active Slots</option>
-            <option value={7} className="bg-slate-900">7 Active Slots</option>
+            <option value={3} className="bg-slate-900">3 Slots</option>
+            <option value={4} className="bg-slate-900">4 Slots</option>
+            <option value={5} className="bg-slate-900">5 Slots</option>
+            <option value={6} className="bg-slate-900">6 Slots</option>
+            <option value={7} className="bg-slate-900">7 Slots</option>
+            <option value={8} className="bg-slate-900">8 Slots</option>
           </select>
         </div>
       </div>
@@ -182,6 +226,25 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
             <span className="hidden sm:inline">Clear Board</span>
           </button>
         )}
+
+        {/* Hidden file input for direct JSON file import */}
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleDirectFileImport}
+          accept=".json,.txt,application/json,text/plain"
+          className="hidden"
+        />
+
+        {/* Direct Open JSON File button */}
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-200 text-xs font-semibold rounded-lg transition"
+          title="Import level directly from a .json file on your device"
+        >
+          <FolderOpen className="w-3.5 h-3.5 text-amber-400" />
+          <span className="hidden sm:inline">Open JSON File</span>
+        </button>
 
         {/* Import/Export Modal */}
         <button

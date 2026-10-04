@@ -318,59 +318,6 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
     ctx.font = '11px monospace';
     ctx.fillText('BOX PLAY AREA (-3.5 to +3.5)', boardMin.x + 8, boardMin.y - 6);
 
-    // -------------------------------------------------------------
-    // Spool Shelf Preview in Scene
-    // -------------------------------------------------------------
-    if (slots) {
-      const shelfMin = worldToScreen(-3.5, 1.4);
-      const shelfMax = worldToScreen(3.5, 0.4);
-      const shelfW = shelfMax.x - shelfMin.x;
-      const shelfH = shelfMax.y - shelfMin.y;
-
-      ctx.save();
-      ctx.fillStyle = 'rgba(30, 41, 59, 0.7)';
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.35)';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.roundRect(shelfMin.x, shelfMin.y, shelfW, shelfH, 8);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = 'rgba(148, 163, 184, 0.8)';
-      ctx.font = 'bold 10px monospace';
-      ctx.fillText(
-        `SPOOL SHELF (${slots.unlockedCount || 4} ACTIVE SLOTS)`,
-        shelfMin.x + 10,
-        shelfMin.y + 14
-      );
-
-      // Slot indicators
-      const totalSlots = slots.count || 5;
-      const unlocked = slots.unlockedCount || 4;
-      const slotBoxW = Math.min(42, (shelfW - 20) / totalSlots - 6);
-      const slotTotalW = totalSlots * (slotBoxW + 6) - 6;
-      const slotStartX = shelfMin.x + (shelfW - slotTotalW) / 2;
-
-      for (let s = 0; s < totalSlots; s++) {
-        const sx = slotStartX + s * (slotBoxW + 6);
-        const sy = shelfMin.y + shelfH - 24;
-        const isUnlocked = s < unlocked;
-
-        ctx.fillStyle = isUnlocked ? 'rgba(15, 23, 42, 0.85)' : 'rgba(51, 65, 85, 0.4)';
-        ctx.strokeStyle = isUnlocked ? 'rgba(56, 189, 248, 0.5)' : 'rgba(71, 85, 105, 0.4)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.roundRect(sx, sy, slotBoxW, 18, 4);
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.fillStyle = isUnlocked ? '#38bdf8' : '#64748b';
-        ctx.font = 'bold 9px monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText(isUnlocked ? `S${s + 1}` : '🔒', sx + slotBoxW / 2, sy + 12);
-      }
-      ctx.restore();
-    }
 
     // -------------------------------------------------------------
     // Dragon Track, Fog Area & Starting Line Preview in Scene
