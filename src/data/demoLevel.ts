@@ -196,12 +196,12 @@ export const STARTER_LEVEL: CleanLevelData = {
     { id: 4, x: 1.5, z: 0.5, angle: 0, numType: 'Box4', capacity: 4, color: 4 },
     // Mid-upper row
     { id: 5, x: -2.0, z: -0.6, angle: 270, numType: 'Box6', capacity: 6, color: 5 },
-    { id: 6, x: -0.8, z: -0.6, angle: 270, numType: 'Box4', capacity: 4, color: 6 },
+    { id: 6, x: -0.8, z: -0.6, angle: 270, numType: 'Box4', capacity: 4, color: 6, boxType: 'Ice' }, // ❄️ Frozen Box
     { id: 7, x: 0.8, z: -0.6, angle: 90, numType: 'Box4', capacity: 4, color: 7 },
     { id: 8, x: 2.0, z: -0.6, angle: 90, numType: 'Box6', capacity: 6, color: 8 },
     // Mid-lower row
     { id: 9, x: -2.0, z: -1.8, angle: 270, numType: 'Box6', capacity: 6, color: 1 },
-    { id: 10, x: -0.8, z: -1.8, angle: 0, numType: 'Box4', capacity: 4, color: 2 },
+    { id: 10, x: -0.8, z: -1.8, angle: 0, numType: 'Box4', capacity: 4, color: 2 }, // Hits box 6 to unfreeze!
     { id: 11, x: 0.8, z: -1.8, angle: 0, numType: 'Box4', capacity: 4, color: 3 },
     { id: 12, x: 2.0, z: -1.8, angle: 90, numType: 'Box6', capacity: 6, color: 4 },
     // Bottom row
@@ -209,6 +209,34 @@ export const STARTER_LEVEL: CleanLevelData = {
     { id: 14, x: -0.5, z: -3.0, angle: 180, numType: 'Box10', capacity: 10, color: 6 },
     { id: 15, x: 0.5, z: -3.0, angle: 180, numType: 'Box6', capacity: 6, color: 7 },
     { id: 16, x: 1.5, z: -3.0, angle: 180, numType: 'Box4', capacity: 4, color: 8 },
+  ],
+  tunnels: [
+    {
+      id: 1,
+      x: 2.6,
+      z: -4.0,
+      angle: 180,
+      queue: [
+        { id: 101, x: 2.6, z: -3.24, angle: 0, numType: 'Box4', capacity: 4, color: 1 },
+        { id: 102, x: 2.6, z: -3.24, angle: 0, numType: 'Box6', capacity: 6, color: 3 },
+      ],
+    },
+  ],
+  conveyors: [
+    {
+      id: 1,
+      z: -4.4,
+      startX: -4.5,
+      endX: 4.5,
+      activeZoneMinX: -2.4,
+      activeZoneMaxX: 2.4,
+      direction: 'left-to-right',
+      speed: 0.8,
+      boxes: [
+        { id: 201, x: -1.2, z: -4.4, angle: 0, numType: 'Box4', capacity: 4, color: 2 },
+        { id: 202, x: 1.0, z: -4.4, angle: 0, numType: 'Box6', capacity: 6, color: 5 },
+      ],
+    },
   ],
 };
 

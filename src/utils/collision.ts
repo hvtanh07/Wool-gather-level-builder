@@ -1,4 +1,4 @@
-import { BoxItem } from '../types/level';
+import { BoxItem, TunnelSetup } from '../types/level';
 import { BOX_DIMENSIONS } from './colors';
 
 export interface Point2D {
@@ -197,3 +197,70 @@ export function checkExitPath(
 export function getAvailableBoxes(boxes: BoxItem[]): BoxItem[] {
   return boxes.filter((b) => !checkExitPath(b, boxes).isBlocked);
 }
+
+/**
+ * Computes the ready box stationed directly in front of a tunnel.
+ * Design rules:
+ * 1. The tunnel element is shown as 2 objects: the tunnel structure itself and the ready box in front of it.
+ * 2. The box direction is ALWAYS in the opposite direction of the tunnel object:
+ *    boxAngle = (tunnel.angle + 180) % 360
+ * 3. The ready box is positioned in front of the tunnel along this opposite exit direction.
+ */
+export function getTunnelReadyBox(tunnel: TunnelSetup): BoxItem | null {
+  if (!tunnel.queue || tunnel.queue.length === 0) return null;
+  const readyBus = tunnel.queue[0];
+  const boxAngle = ((tunnel.angle || 0) + 180) % 360;
+  const boxDir = angleToDirection(boxAngle);
+  const tunDim = BOX_DIMENSIONS.Box6;
+  const boxDim = BOX_DIMENSIONS[readyBus.numType] || BOX_DIMENSIONS.Box6;
+  const offsetDist = (tunDim.length + boxDim.length) / 2;
+
+  return {
+    ...readyBus,
+    id: readyBus.id || -(tunnel.id * 1000 + 1),
+    x: Number((tunnel.x + boxDir.x * offsetDist).toFixed(3)),
+    z: Number((tunnel.z + boxDir.z * offsetDist).toFixed(3)),
+    angle: boxAngle,
+  };
+}
+
+/**
+ * Checks whether a 2D world point (wx, wz) is inside either the tunnel structure
+ * or the ready box positioned in front of it.
+ */
+export function isPointInTunnelCompound(wx: number, wz: number, tunnel: TunnelSetup): boolean {
+  // 1. Check tunnel structure bounds at (tunnel.x, tunnel.z)
+  const dir = angleToDirection(tunnel.angle);
+  const right = { x: dir.z, z: -dir.x };
+  const dx = wx - tunnel.x;
+  const dz = wz - tunnel.z;
+  const u = dx * dir.x + dz * dir.z;
+  const v = dx * right.x + dz * right.z;
+  if (
+    Math.abs(u) <= BOX_DIMENSIONS.Box6.length / 2 + 0.05 &&
+    Math.abs(v) <= BOX_DIMENSIONS.Box6.width / 2 + 0.05
+  ) {
+    return true;
+  }
+
+  // 2. Check ready box stationed in front of the tunnel
+  const readyBox = getTunnelReadyBox(tunnel);
+  if (readyBox) {
+    const bDir = angleToDirection(readyBox.angle);
+    const bRight = { x: bDir.z, z: -bDir.x };
+    const bdx = wx - readyBox.x;
+    const bdz = wz - readyBox.z;
+    const bu = bdx * bDir.x + bdz * bDir.z;
+    const bv = bdx * bRight.x + bdz * bRight.z;
+    const bDim = BOX_DIMENSIONS[readyBox.numType] || BOX_DIMENSIONS.Box6;
+    if (
+      Math.abs(bu) <= bDim.length / 2 + 0.05 &&
+      Math.abs(bv) <= bDim.width / 2 + 0.05
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+

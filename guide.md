@@ -117,6 +117,42 @@ A minimal, readable JSON format containing only the essential gameplay data:
       "capacity": 6,
       "color": 2,
       "boxType": "Normal"
+    },
+    {
+      "id": 2,
+      "x": -0.8,
+      "z": -0.6,
+      "angle": 270,
+      "numType": "Box4",
+      "capacity": 4,
+      "color": 6,
+      "boxType": "Ice"
+    }
+  ],
+  "tunnels": [
+    {
+      "id": 1,
+      "x": 2.6,
+      "z": 0.5,
+      "angle": 0,
+      "queue": [
+        { "id": 101, "x": 2.6, "z": 0.5, "angle": 0, "numType": "Box4", "capacity": 4, "color": 1 }
+      ]
+    }
+  ],
+  "conveyors": [
+    {
+      "id": 1,
+      "z": -4.4,
+      "startX": -4.5,
+      "endX": 4.5,
+      "activeZoneMinX": -2.4,
+      "activeZoneMaxX": 2.4,
+      "direction": "left-to-right",
+      "speed": 0.8,
+      "boxes": [
+        { "id": 201, "x": -1.2, "z": -4.4, "angle": 0, "numType": "Box4", "capacity": 4, "color": 2 }
+      ]
     }
   ]
 }
@@ -254,6 +290,55 @@ In `src/utils/colors.ts`, dimensions are calibrated against the real game grid:
   - **Collapse / Expand Toggle**: Allows collapsing into a sleek 48px icon strip to maximize canvas space.
   - **Quick Playtest Action**: Direct launch into Playtest mode.
 
+### 5.6 Advanced Gameplay Elements & Gimmicks
+
+#### 1. Tunnel (Warehouse Dispenser)
+- **Functional Logic**:
+  - **Two-Object Compound Representation**: The tunnel element is visually and functionally shown as two distinct objects:
+    1. **The Tunnel Structure Itself**: A metallic capsule (`0.54\text{ width} \times 0.76\text{ length}`) featuring silver side guide rails, a recessed center track, forward chevrons, and a prominent bold counter displaying the remaining number of stored buses in the queue (`tun.queue.length - 1`).
+    2. **The Ready Box Object In Front**: A full-sized bus stationed immediately in front of the tunnel mouth.
+  - **Opposite Direction Rule**: The ready box's direction is **always** opposite to the tunnel object's orientation:
+    $$\text{boxAngle} = (\text{tunnel.angle} + 180^\circ) \pmod{360}$$
+    The ready box is positioned in front of the tunnel mouth along this opposite departure vector, ensuring its exit path points directly outward into the board.
+  - **Exit Raycasting**: The editor casts exit rays directly from the front edge of the ready box along its exit trajectory, displaying obstruction warnings or targeting frozen boxes.
+  - **Dispensing Mechanism**: When the ready bus in front is launched to an empty parking slot, the next stored bus from the queue is instantly dispensed and slides out into the ready position (`sounds.playTunnelDispense()`).
+  - **Dual Click Interaction**: Players can click either the ready box or the tunnel structure to launch the bus or trigger unfreezing attacks against blocking ice boxes.
+- **Editor & Inspector**:
+  - Add tunnels via the `+ Tunnel` button under the Gimmicks section in the left sidebar.
+  - Position `(x, z)` and tunnel orientation (`0°`, `90°`, `180°`, `270°`) can be adjusted via inspector sliders or by dragging either object directly on the canvas.
+  - Built-in queue manager: Add buses, change color/capacity, delete, or reorder the dispensing sequence.
+
+#### 2. Conveyor (Conveyor Belt)
+- **Functional Logic**:
+  - Motorized conveyor belt running horizontally across the screen at coordinate `conveyor.z`.
+  - Moves continuously at `conveyor.speed` in either `left-to-right` or `right-to-left` direction.
+  - **Continuous Looping**: When a bus travels past the end of the belt (`endX`), it despawns and respawns at the beginning (`startX`), maintaining a seamless infinite loop.
+  - **Even Box Spreading**: When buses are added or deleted from the conveyor, all buses automatically spread evenly across the belt length ($x_i = minX + (i + 0.5) \cdot \frac{L}{N}$), ensuring optimal pacing and circulation. An explicit `"⚡ Evenly Spread Buses"` button is also available in the inspector.
+  - **Preset Active Pickup Zone**: Players can interact with buses on the conveyor **only** while the bus is within the active zone (`[activeZoneMinX, activeZoneMaxX]`).
+  - **Narrow-Screen Protection**: The active pickup zone is preset safely inside the play area bounds ($[-2.4, 2.4]$) to prevent screen edge clipping on narrow phone aspect ratios.
+  - **Covered Side Hoods**: Both ends of the screen feature metallic tunnel hoods housing the despawn/respawn areas. Clicking buses outside the active zone triggers a warning shake and `"Outside Active Zone!"` feedback.
+  - **Counter**: Displays an LED counter badge `[ 🔄 N ]` tracking total remaining buses on the belt.
+- **Editor & Inspector**:
+  - Add conveyors via the `+ Conveyor` button in the left sidebar.
+  - Configure `z` position, movement direction, speed, and active zone bounds (`activeZoneMinX`, `activeZoneMaxX`).
+  - Manage circulating buses on the belt (add, adjust capacity, change wool color, or remove).
+
+#### 3. Frozen Box (Ice Gimmick)
+- **Functional Logic**:
+  - Encased in thick ice (`boxType: 'Ice'` or `'Frozen'`).
+  - **Locked State**: Locked in place and cannot be directly selected or moved to a parking slot. Clicking a frozen box triggers a frosty rattle sound (`sounds.playIceShake()`) and shows `"Frozen! ❄️ Launch a bus to break ice"`.
+  - **Unfreezing Collision Mechanism**:
+    - To shatter the ice, the player must launch an unfrozen bus whose exit path intersects the frozen bus.
+    - **Collision Attack**: The unfrozen attacker rushes forward along its exit trajectory until impact.
+    - **Impact & Shatter**: Upon impact, ice crystals shatter with glass break audio (`sounds.playIceShatter()`), flying crystal particles erupt, floating feedback `"CRACK! ❄️💥"` appears, and the target bus is instantly unfrozen (`boxType = 'Normal'`).
+    - **Bounce-Back**: The attacking bus bounces back smoothly to its exact starting position (`sounds.playBounce()`).
+    - Once unfrozen, the newly freed bus behaves like a normal movable bus.
+- **Visuals & Solver Integration**:
+  - Rendered with crystalline ice gradient overlay, jagged crack lines, and a `❄️` snowflake badge.
+  - Editor exit rays hitting frozen targets illuminate with frost cyan and an ice shatter impact reticle.
+  - The solver (`solveBoxLayout`) simulates unfreezing moves to guarantee solvability verification.
+  - `autoGenerateDragonSections` accepts tunnel and conveyor buses as `extraBoxes`, ensuring total dragon wool strictly equals total level wool across board, tunnels, and conveyor belts.
+
 ---
 
 ## 6. How to Run, Build & Host
@@ -284,12 +369,11 @@ To host on GitHub:
 ## 7. Roadmap / Future Features to Implement
 
 When continuing this project, consider these next steps:
-1. **Gimmicks & Special Boxes**:
-   - The original game schema supports `Ice`, `Question`, `Chain`, `Garage`, `Conveyor`, `KeyLock`.
-   - Add visual representations and game mechanics for locked boxes (e.g. Ice breaking on match, Garage releasing a queue of boxes).
-2. **Interactive Dragon Track Editor**:
-   - Add handles on the road track in the editor so designers can drag spline waypoints or add custom curves.
-3. **Cat Checkpoint Positioning**:
-   - Add visual sliders or path markers to position the cat checkpoints interactively on the canvas.
-4. **Mobile Layout Preview**:
-   - Add a device frame preview toggle (e.g. iPhone / Android aspect ratio overlay) to preview how the level fits on mobile screens.
+1. **Interactive Dragon Track Editor**:
+   - Add spline control points directly draggable on the canvas to design custom track curves visually.
+2. **Additional Special Gimmicks**:
+   - `Question Box` (mystery color revealed on launch).
+   - `Chain Box` (linked pairs of boxes that must be cleared simultaneously).
+   - `Key & Lock Box` (requires collecting key box before lock opens).
+3. **Mobile Layout Preview**:
+   - Add a device frame preview toggle (e.g. iPhone / Android 9:16 aspect ratio overlay) to preview how the level fits on mobile screens.

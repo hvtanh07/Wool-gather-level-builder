@@ -3,6 +3,8 @@
 export type BoxNumType = 'Box4' | 'Box6' | 'Box10';
 export type LevelType = 'Normal' | 'Hard';
 
+export type BoxType = 'Normal' | 'Ice' | string;
+
 export interface BoxItem {
   id: number;
   x: number;
@@ -11,7 +13,33 @@ export interface BoxItem {
   numType: BoxNumType;
   capacity: number; // 4, 6, 10
   color: number; // 1 to 8
-  boxType?: string; // "Normal", "Ice", "Garage", etc. Default "Normal"
+  boxType?: BoxType; // "Normal", "Ice" (Frozen), etc. Default "Normal"
+}
+
+export const isBoxFrozen = (box: BoxItem | null | undefined): boolean => {
+  return !!box && (box.boxType === 'Ice' || box.boxType === 'Frozen');
+};
+
+// Tunnel (Warehouse / Portal dispenser)
+export interface TunnelSetup {
+  id: number;
+  x: number;
+  z: number;
+  angle: number; // orientation of tunnel portal exit (0 = Up, 90 = Right, 180 = Down, 270 = Left)
+  queue: BoxItem[]; // queue of stored buses inside the tunnel
+}
+
+// Conveyor Belt
+export interface ConveyorSetup {
+  id: number;
+  z: number; // Z position on the board (e.g. -1.0)
+  startX: number; // left screen edge, e.g. -4.5
+  endX: number; // right screen edge, e.g. 4.5
+  activeZoneMinX: number; // preset interaction zone start (e.g. -2.6)
+  activeZoneMaxX: number; // preset interaction zone end (e.g. 2.6)
+  direction: 'left-to-right' | 'right-to-left'; // default 'left-to-right'
+  speed: number; // world units per sec (e.g. 0.6)
+  boxes: BoxItem[]; // buses circulating on the belt
 }
 
 export interface DragonSection {
@@ -58,6 +86,8 @@ export interface CleanLevelData {
   slots: SlotsSetup;
   dragon: DragonSetup;
   boxes: BoxItem[];
+  tunnels?: TunnelSetup[];
+  conveyors?: ConveyorSetup[];
 }
 
 // Legacy format representation for importing old lvmap_*.json files

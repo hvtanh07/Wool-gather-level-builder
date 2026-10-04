@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { BoxItem, BoxNumType, DragonSetup } from '../types/level';
-import { BOX_DIMENSIONS, getWoolColor, getBoxNumType } from '../utils/colors';
-import { checkExitPath, getBoxCorners, angleToDirection } from '../utils/collision';
+import { BoxItem, BoxNumType, DragonSetup, TunnelSetup, ConveyorSetup, isBoxFrozen } from '../types/level';
+import { BOX_DIMENSIONS, getWoolColor, getBoxNumType, ICE_THEME, TUNNEL_THEME, CONVEYOR_THEME } from '../utils/colors';
+import { checkExitPath, getBoxCorners, angleToDirection, getTunnelReadyBox, isPointInTunnelCompound } from '../utils/collision';
 import { solveBoxLayout } from '../utils/dragonSolver';
 import { sounds } from '../utils/audio';
 import { CheckCircle2, AlertTriangle, ListOrdered, ShieldAlert, HelpCircle, Eye, EyeOff, Maximize2 } from 'lucide-react';
@@ -17,6 +17,14 @@ interface CanvasEditorProps {
   showRays: boolean;
   dragon?: DragonSetup;
   slots?: { count: number; unlockedCount?: number };
+  tunnels?: TunnelSetup[];
+  onUpdateTunnels?: (tunnels: TunnelSetup[]) => void;
+  selectedTunnelId?: number | null;
+  onSelectTunnel?: (id: number | null) => void;
+  conveyors?: ConveyorSetup[];
+  onUpdateConveyors?: (conveyors: ConveyorSetup[]) => void;
+  selectedConveyorId?: number | null;
+  onSelectConveyor?: (id: number | null) => void;
 }
 
 export const CanvasEditor: React.FC<CanvasEditorProps> = ({
@@ -28,6 +36,14 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
   showRays,
   dragon,
   slots,
+  tunnels = [],
+  onUpdateTunnels,
+  selectedTunnelId = null,
+  onSelectTunnel,
+  conveyors = [],
+  onUpdateConveyors,
+  selectedConveyorId = null,
+  onSelectConveyor,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -40,6 +56,8 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
 
   // Hover detection for smooth grab cursor
   const [hoveredBoxId, setHoveredBoxId] = useState<number | null>(null);
+  const [hoveredTunnelId, setHoveredTunnelId] = useState<number | null>(null);
+  const [hoveredConveyorId, setHoveredConveyorId] = useState<number | null>(null);
 
   // Dragging boxes
   const [isDraggingBox, setIsDraggingBox] = useState(false);
@@ -56,6 +74,25 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
     mouseY: 0,
     boxPositions: new Map(),
   });
+
+  // Dragging Tunnels
+  const [isDraggingTunnel, setIsDraggingTunnel] = useState(false);
+  const [dragTunnelStart, setDragTunnelStart] = useState<{
+    mouseX: number;
+    mouseY: number;
+    tunnelId: number;
+    startX: number;
+    startZ: number;
+  } | null>(null);
+
+  // Dragging Conveyors
+  const [isDraggingConveyor, setIsDraggingConveyor] = useState(false);
+  const [dragConveyorStart, setDragConveyorStart] = useState<{
+    mouseX: number;
+    mouseY: number;
+    conveyorId: number;
+    startZ: number;
+  } | null>(null);
 
   // Marquee selection
   const [isMarquee, setIsMarquee] = useState(false);
@@ -180,6 +217,37 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
       return undefined;
     },
     [boxes]
+  );
+
+  const findTunnelAt = useCallback(
+    (wx: number, wz: number): TunnelSetup | undefined => {
+      for (let i = tunnels.length - 1; i >= 0; i--) {
+        if (isPointInTunnelCompound(wx, wz, tunnels[i])) {
+          return tunnels[i];
+        }
+      }
+      return undefined;
+    },
+    [tunnels]
+  );
+
+  // Check if a point is inside a conveyor belt
+  const isPointInConveyor = (wx: number, wz: number, c: ConveyorSetup): boolean => {
+    const minX = Math.min(c.startX, c.endX);
+    const maxX = Math.max(c.startX, c.endX);
+    return wx >= minX && wx <= maxX && Math.abs(wz - c.z) <= 0.45;
+  };
+
+  const findConveyorAt = useCallback(
+    (wx: number, wz: number): ConveyorSetup | undefined => {
+      for (let i = conveyors.length - 1; i >= 0; i--) {
+        if (isPointInConveyor(wx, wz, conveyors[i])) {
+          return conveyors[i];
+        }
+      }
+      return undefined;
+    },
+    [conveyors]
   );
 
   // Draw loop
@@ -471,20 +539,222 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
       ctx.restore();
     }
 
+    // -------------------------------------------------------------
+    // DRAW CONVEYORS
+    // -------------------------------------------------------------
+    conveyors.forEach((conv) => {
+      const isSelected = selectedConveyorId === conv.id;
+      const isHovered = hoveredConveyorId === conv.id;
+      const beltH = 0.85 * zoom;
+      const pStart = worldToScreen(conv.startX, conv.z);
+      const pEnd = worldToScreen(conv.endX, conv.z);
+      const minX = Math.min(pStart.x, pEnd.x);
+      const maxX = Math.max(pStart.x, pEnd.x);
+      const beltW = maxX - minX;
+      const beltY = pStart.y - beltH / 2;
+
+      ctx.save();
+
+      // Belt shadow / glow
+      ctx.shadowColor = isSelected ? 'rgba(6, 182, 212, 0.8)' : 'rgba(0, 0, 0, 0.5)';
+      ctx.shadowBlur = isSelected ? 14 : isHovered ? 8 : 4;
+
+      // Dark rubber belt base
+      ctx.fillStyle = CONVEYOR_THEME.beltHex;
+      ctx.beginPath();
+      ctx.roundRect(minX, beltY, beltW, beltH, 6);
+      ctx.fill();
+
+      ctx.shadowColor = 'transparent';
+
+      // Belt border
+      ctx.lineWidth = isSelected ? 2.5 : 1.5;
+      ctx.strokeStyle = isSelected ? '#06b6d4' : isHovered ? '#94a3b8' : CONVEYOR_THEME.borderHex;
+      ctx.stroke();
+
+      // Rubber tread ribs
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+      ctx.lineWidth = 1;
+      const treadStep = 12;
+      for (let tx = minX + 8; tx < maxX - 8; tx += treadStep) {
+        ctx.beginPath();
+        ctx.moveTo(tx, beltY + 3);
+        ctx.lineTo(tx, beltY + beltH - 3);
+        ctx.stroke();
+      }
+
+      // Direction chevrons
+      const isLTR = conv.direction === 'left-to-right';
+      ctx.fillStyle = CONVEYOR_THEME.chevronHex;
+      ctx.font = 'bold 12px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const chevCount = Math.max(3, Math.floor(beltW / 50));
+      for (let i = 1; i < chevCount; i++) {
+        const cx = minX + (i * beltW) / chevCount;
+        ctx.fillText(isLTR ? '▶▶▶' : '◀◀◀', cx, beltY + beltH / 2);
+      }
+
+      // Active Zone Highlight (Preset interactive zone)
+      const pActiveMin = worldToScreen(conv.activeZoneMinX, conv.z);
+      const pActiveMax = worldToScreen(conv.activeZoneMaxX, conv.z);
+      const activeLeft = Math.min(pActiveMin.x, pActiveMax.x);
+      const activeRight = Math.max(pActiveMin.x, pActiveMax.x);
+      const activeW = activeRight - activeLeft;
+
+      // Active zone background tint
+      ctx.fillStyle = CONVEYOR_THEME.activeZoneBg;
+      ctx.fillRect(activeLeft, beltY, activeW, beltH);
+
+      // Neon cyan border markers for active zone
+      ctx.strokeStyle = CONVEYOR_THEME.activeZoneBorder;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      ctx.strokeRect(activeLeft, beltY, activeW, beltH);
+      ctx.setLineDash([]);
+
+      // Active zone label badge
+      ctx.fillStyle = 'rgba(6, 182, 212, 0.2)';
+      ctx.fillRect(activeLeft, beltY + beltH - 12, activeW, 12);
+      ctx.fillStyle = '#67e8f9';
+      ctx.font = 'bold 8px monospace';
+      ctx.fillText('⚡ ACTIVE PICK ZONE ⚡', activeLeft + activeW / 2, beltY + beltH - 6);
+
+      // Covered Hoods at ends (Left & Right screen sides)
+      const hoodW = Math.max(28, zoom * 0.65);
+      ctx.fillStyle = CONVEYOR_THEME.hoodHex;
+      // Left hood
+      ctx.beginPath();
+      ctx.roundRect(minX - 2, beltY - 2, hoodW, beltH + 4, [6, 0, 0, 6]);
+      ctx.fill();
+      ctx.strokeStyle = '#475569';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Right hood
+      ctx.beginPath();
+      ctx.roundRect(maxX - hoodW + 2, beltY - 2, hoodW, beltH + 4, [0, 6, 6, 0]);
+      ctx.fill();
+      ctx.stroke();
+
+      // LED Counter Display: [ 🔄 CONV N ]
+      const badgeText = `🔄 CONV [${conv.boxes.length}]`;
+      ctx.fillStyle = '#0f172a';
+      ctx.beginPath();
+      ctx.roundRect(minX + 8, beltY - 18, 80, 16, 4);
+      ctx.fill();
+      ctx.strokeStyle = CONVEYOR_THEME.counterHex;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = CONVEYOR_THEME.counterHex;
+      ctx.font = 'bold 9px monospace';
+      ctx.fillText(badgeText, minX + 48, beltY - 10);
+
+      ctx.restore();
+
+      // Render Conveyor Buses
+      conv.boxes.forEach((cb) => {
+        const cScreen = worldToScreen(cb.x, conv.z);
+        const colDef = getWoolColor(cb.color);
+        const dim = BOX_DIMENSIONS[cb.numType] || BOX_DIMENSIONS.Box4;
+        const bW = dim.width * zoom;
+        const bL = dim.length * zoom;
+
+        ctx.save();
+        ctx.translate(cScreen.x, cScreen.y);
+        ctx.rotate((cb.angle * Math.PI) / 180);
+
+        ctx.shadowColor = 'rgba(0,0,0,0.4)';
+        ctx.shadowBlur = 4;
+        ctx.shadowOffsetY = 2;
+
+        const bx = -bW / 2;
+        const by = -bL / 2;
+        ctx.beginPath();
+        ctx.roundRect(bx, by, bW, bL, 5);
+
+        const bGrad = ctx.createLinearGradient(bx, by, bx + bW, by + bL);
+        bGrad.addColorStop(0, colDef.lightHex);
+        bGrad.addColorStop(0.5, colDef.hex);
+        bGrad.addColorStop(1, colDef.darkHex);
+        ctx.fillStyle = bGrad;
+        ctx.fill();
+
+        ctx.shadowColor = 'transparent';
+
+        const inActive = cb.x >= conv.activeZoneMinX && cb.x <= conv.activeZoneMaxX;
+        ctx.strokeStyle = inActive ? '#ffffff' : 'rgba(255,255,255,0.4)';
+        ctx.lineWidth = inActive ? 1.5 : 1;
+        ctx.stroke();
+
+        const pW = Math.min(bW * 0.75, 24);
+        const pH = 12;
+        const pY = bL / 2 - pH - 3;
+        ctx.beginPath();
+        ctx.roundRect(-pW / 2, pY, pW, pH, 5);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 9px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`${cb.capacity}`, 0, pY + pH / 2);
+
+        ctx.restore();
+      });
+    });
+
+    // Collect all obstacles: board boxes + ready boxes + stationary tunnel structures
+    const tunnelObstacles: BoxItem[] = [];
+    tunnels.forEach((tun) => {
+      const rBox = getTunnelReadyBox(tun);
+      if (rBox) tunnelObstacles.push(rBox);
+      // Stationary tunnel structure acts as an obstacle
+      tunnelObstacles.push({
+        id: -(tun.id * 1000 + 999),
+        x: tun.x,
+        z: tun.z,
+        angle: tun.angle,
+        numType: 'Box6',
+        capacity: 6,
+        color: 1,
+        boxType: 'Normal',
+      });
+    });
+    const allObstacles = [...boxes, ...tunnelObstacles];
+
     // Precalculate exit blockage for all boxes
     const exitStatus = new Map<number, ReturnType<typeof checkExitPath>>();
     boxes.forEach((b) => {
-      exitStatus.set(b.id, checkExitPath(b, boxes));
+      exitStatus.set(b.id, checkExitPath(b, allObstacles));
     });
 
-    // Draw exit rays if enabled or for selected box
-    if (showRays || selectedBoxIds.length > 0) {
+    // Precalculate exit blockage for tunnels with a ready bus
+    const tunnelExitStatus = new Map<number, ReturnType<typeof checkExitPath>>();
+    tunnels.forEach((tun) => {
+      const readyBox = getTunnelReadyBox(tun);
+      if (readyBox) {
+        // Exclude the readyBox itself and its parent tunnel structure
+        const otherObstacles = allObstacles.filter(
+          (o) => o.id !== readyBox.id && o.id !== -(tun.id * 1000 + 999)
+        );
+        tunnelExitStatus.set(tun.id, checkExitPath(readyBox, otherObstacles));
+      }
+    });
+
+    // Draw exit rays if enabled or for selected box/tunnel
+    if (showRays || selectedBoxIds.length > 0 || selectedTunnelId !== null) {
       boxes.forEach((b) => {
         const isSelected = selectedBoxIds.includes(b.id);
         if (!showRays && !isSelected) return;
 
         const corners = getBoxCorners(b);
         const status = exitStatus.get(b.id);
+        const isTargetFrozen =
+          status?.isBlocked && status.blockingBoxId
+            ? isBoxFrozen(boxes.find((target) => target.id === status.blockingBoxId))
+            : false;
+
         const pStart = worldToScreen(
           b.x + corners.direction.x * (corners.length / 2),
           b.z + corners.direction.z * (corners.length / 2)
@@ -499,18 +769,79 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
         ctx.beginPath();
         ctx.moveTo(pStart.x, pStart.y);
         ctx.lineTo(pEnd.x, pEnd.y);
-        ctx.strokeStyle = status?.isBlocked ? 'rgba(239, 68, 68, 0.7)' : 'rgba(34, 197, 94, 0.85)';
+        ctx.strokeStyle = isTargetFrozen
+          ? 'rgba(56, 189, 248, 0.95)'
+          : status?.isBlocked
+          ? 'rgba(239, 68, 68, 0.7)'
+          : 'rgba(34, 197, 94, 0.85)';
         ctx.lineWidth = isSelected ? 2.5 : 1.5;
-        ctx.setLineDash(status?.isBlocked ? [4, 4] : []);
+        ctx.setLineDash(status?.isBlocked ? (isTargetFrozen ? [6, 3] : [4, 4]) : []);
         ctx.stroke();
         ctx.setLineDash([]);
 
         if (status?.isBlocked && status.hitPoint) {
           const hitScreen = worldToScreen(status.hitPoint.x, status.hitPoint.z);
           ctx.beginPath();
-          ctx.arc(hitScreen.x, hitScreen.y, 4, 0, Math.PI * 2);
-          ctx.fillStyle = '#ef4444';
+          ctx.arc(hitScreen.x, hitScreen.y, isTargetFrozen ? 6 : 4, 0, Math.PI * 2);
+          ctx.fillStyle = isTargetFrozen ? '#38bdf8' : '#ef4444';
           ctx.fill();
+          if (isTargetFrozen) {
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+          }
+        }
+      });
+
+      // Draw exit rays for tunnels with ready bus (originating from front of ready box)
+      tunnels.forEach((tun) => {
+        const isSelected = selectedTunnelId === tun.id;
+        if (!showRays && !isSelected) return;
+        const readyBox = getTunnelReadyBox(tun);
+        if (!readyBox) return;
+
+        const status = tunnelExitStatus.get(tun.id);
+        const corners = getBoxCorners(readyBox);
+        const isTargetFrozen =
+          status?.isBlocked && status.blockingBoxId
+            ? isBoxFrozen(boxes.find((target) => target.id === status.blockingBoxId))
+            : false;
+
+        const pStart = worldToScreen(
+          readyBox.x + corners.direction.x * (corners.length / 2),
+          readyBox.z + corners.direction.z * (corners.length / 2)
+        );
+
+        const rayDist = status?.isBlocked && status.distanceToBlocker ? status.distanceToBlocker : 15;
+        const pEnd = worldToScreen(
+          readyBox.x + corners.direction.x * (corners.length / 2 + rayDist),
+          readyBox.z + corners.direction.z * (corners.length / 2 + rayDist)
+        );
+
+        ctx.beginPath();
+        ctx.moveTo(pStart.x, pStart.y);
+        ctx.lineTo(pEnd.x, pEnd.y);
+        ctx.strokeStyle = isTargetFrozen
+          ? 'rgba(56, 189, 248, 0.95)'
+          : status?.isBlocked
+          ? 'rgba(239, 68, 68, 0.7)'
+          : 'rgba(34, 197, 94, 0.85)';
+        ctx.lineWidth = isSelected ? 2.5 : 1.5;
+        ctx.setLineDash(status?.isBlocked ? (isTargetFrozen ? [6, 3] : [4, 4]) : [6, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        if (status?.isBlocked && status.hitPoint) {
+          const hitScreen = worldToScreen(status.hitPoint.x, status.hitPoint.z);
+          ctx.beginPath();
+          ctx.arc(hitScreen.x, hitScreen.y, isTargetFrozen ? 6 : 4, 0, Math.PI * 2);
+          ctx.fillStyle = isTargetFrozen ? '#38bdf8' : '#ef4444';
+          ctx.fill();
+          if (isTargetFrozen) {
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+          }
         }
       });
     }
@@ -520,6 +851,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
       const isSelected = selectedBoxIds.includes(b.id);
       const isHovered = hoveredBoxId === b.id;
       const isDeadlocked = deadlockedIds.has(b.id);
+      const isFrozen = isBoxFrozen(b);
       const exitStep = solutionOrderMap.get(b.id);
       const status = exitStatus.get(b.id);
       const isClear = !status?.isBlocked;
@@ -535,15 +867,17 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
       const rad = (b.angle * Math.PI) / 180;
       ctx.rotate(rad);
 
-      // Box shadow: glowing red if deadlocked, cyan if selected, subtle otherwise
+      // Box shadow: glowing red if deadlocked, cyan if selected, ice glow if frozen, subtle otherwise
       ctx.shadowColor = isDeadlocked
         ? 'rgba(239, 68, 68, 0.85)'
         : isSelected
         ? 'rgba(56, 189, 248, 0.7)'
+        : isFrozen
+        ? 'rgba(56, 189, 248, 0.65)'
         : isHovered
         ? 'rgba(255, 255, 255, 0.4)'
         : 'rgba(0, 0, 0, 0.4)';
-      ctx.shadowBlur = isDeadlocked ? 14 : isSelected ? 12 : isHovered ? 8 : 6;
+      ctx.shadowBlur = isDeadlocked ? 14 : isSelected ? 12 : isFrozen ? 10 : isHovered ? 8 : 6;
       ctx.shadowOffsetY = 3;
 
       // Box base rectangle with rounded corners
@@ -579,16 +913,44 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
         ctx.stroke();
       }
 
-      // Box border: red if deadlocked, cyan if selected, white if hovered, green if clear
-      ctx.lineWidth = isSelected ? 3 : isDeadlocked ? 2.5 : isHovered ? 2.5 : isClear ? 2 : 1;
+      // Crystalline Ice overlay for Frozen Box
+      if (isFrozen) {
+        const iceGrad = ctx.createLinearGradient(rx, ry, rx + rw, ry + rh);
+        iceGrad.addColorStop(0, 'rgba(224, 242, 254, 0.85)');
+        iceGrad.addColorStop(0.5, 'rgba(186, 230, 253, 0.6)');
+        iceGrad.addColorStop(1, 'rgba(125, 211, 252, 0.85)');
+        ctx.fillStyle = iceGrad;
+        ctx.beginPath();
+        ctx.roundRect(rx, ry, rw, rh, radius);
+        ctx.fill();
+
+        // Jagged ice crack lines
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.lineWidth = 1.3;
+        ctx.beginPath();
+        ctx.moveTo(rx + 4, ry + 6);
+        ctx.lineTo(rx + rw * 0.35, ry + rh * 0.4);
+        ctx.lineTo(rx + rw * 0.2, ry + rh * 0.7);
+        ctx.moveTo(rx + rw - 4, ry + 8);
+        ctx.lineTo(rx + rw * 0.6, ry + rh * 0.35);
+        ctx.lineTo(rx + rw * 0.7, ry + rh * 0.75);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // Box border
+      ctx.lineWidth = isSelected ? 3 : isFrozen ? 2.5 : isDeadlocked ? 2.5 : isHovered ? 2.5 : isClear ? 2 : 1;
       ctx.strokeStyle = isSelected
         ? '#38bdf8'
+        : isFrozen
+        ? '#7dd3fc'
         : isDeadlocked
         ? '#f43f5e'
         : isHovered
         ? '#ffffff'
         : isClear
-        ? '#4ade80' // Green hint if unblocked
+        ? '#4ade80'
         : 'rgba(0, 0, 0, 0.5)';
       if (isDeadlocked && !isSelected) {
         ctx.setLineDash([4, 2]);
@@ -640,6 +1002,26 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
       ctx.font = '9px monospace';
       ctx.fillText(`#${b.id}`, 0, 0);
 
+      // Snowflake badge in corner for Frozen Box
+      if (isFrozen) {
+        const badgeSize = 14;
+        const bX = rx + rw - badgeSize - 2;
+        const bY = ry + 2;
+        ctx.beginPath();
+        ctx.roundRect(bX, bY, badgeSize, badgeSize, 4);
+        ctx.fillStyle = 'rgba(12, 74, 110, 0.88)';
+        ctx.fill();
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        ctx.fillStyle = '#e0f2fe';
+        ctx.font = '9px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('❄️', bX + badgeSize / 2, bY + badgeSize / 2);
+      }
+
       // Deadlock warning icon on box
       if (isDeadlocked) {
         ctx.fillStyle = '#ef4444';
@@ -667,12 +1049,10 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
         const by = -screenL / 2 + 2;
 
         ctx.save();
-        // Drop shadow for 3D elevation above any box color
         ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
         ctx.shadowBlur = 5;
         ctx.shadowOffsetY = 2;
 
-        // Deep obsidian black pill background
         ctx.beginPath();
         ctx.roundRect(bx, by, badgeW, badgeH, 6);
         ctx.fillStyle = '#030712';
@@ -680,12 +1060,10 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
 
         ctx.shadowColor = 'transparent';
 
-        // High-contrast electric golden amber border
         ctx.lineWidth = 1.5;
         ctx.strokeStyle = '#fbbf24';
         ctx.stroke();
 
-        // High-contrast neon gold-yellow text
         ctx.fillStyle = '#fef08a';
         ctx.font = 'bold 9px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
         ctx.textAlign = 'center';
@@ -696,6 +1074,223 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
       }
 
       ctx.restore();
+    });
+
+    // -------------------------------------------------------------
+    // DRAW TUNNELS (Shown as 2 objects: Tunnel structure & Ready Box in front)
+    // -------------------------------------------------------------
+    tunnels.forEach((tun) => {
+      const isSelected = selectedTunnelId === tun.id;
+      const isHovered = hoveredTunnelId === tun.id;
+      const tScreen = worldToScreen(tun.x, tun.z);
+      const tunDim = BOX_DIMENSIONS.Box6;
+      const tunW = tunDim.width * zoom;
+      const tunH = tunDim.length * zoom;
+
+      // 1. Draw the Tunnel Structure itself
+      ctx.save();
+      ctx.translate(tScreen.x, tScreen.y);
+      ctx.rotate((tun.angle * Math.PI) / 180);
+
+      // Tunnel Arch Shadow
+      ctx.shadowColor = isSelected ? 'rgba(250, 204, 21, 0.85)' : 'rgba(0, 0, 0, 0.65)';
+      ctx.shadowBlur = isSelected ? 16 : isHovered ? 10 : 6;
+
+      const ax = -tunW / 2;
+      const ay = -tunH / 2;
+
+      // Outer metallic capsule body
+      ctx.beginPath();
+      ctx.roundRect(ax, ay, tunW, tunH, 7);
+      const tunBodyGrad = ctx.createLinearGradient(ax, ay, ax + tunW, ay + tunH);
+      tunBodyGrad.addColorStop(0, '#334155');
+      tunBodyGrad.addColorStop(0.5, '#1e293b');
+      tunBodyGrad.addColorStop(1, '#0f172a');
+      ctx.fillStyle = tunBodyGrad;
+      ctx.fill();
+
+      ctx.shadowColor = 'transparent';
+
+      // Outer border
+      ctx.lineWidth = isSelected ? 2.5 : 1.5;
+      ctx.strokeStyle = isSelected ? '#facc15' : isHovered ? '#38bdf8' : '#475569';
+      ctx.stroke();
+
+      // Side metallic rails (Left & Right bumpers)
+      const railW = Math.max(4, tunW * 0.16);
+
+      // Left rail
+      ctx.beginPath();
+      ctx.roundRect(ax + 2, ay + 2, railW, tunH - 4, 3);
+      const leftRailGrad = ctx.createLinearGradient(ax + 2, 0, ax + 2 + railW, 0);
+      leftRailGrad.addColorStop(0, '#94a3b8');
+      leftRailGrad.addColorStop(0.5, '#cbd5e1');
+      leftRailGrad.addColorStop(1, '#475569');
+      ctx.fillStyle = leftRailGrad;
+      ctx.fill();
+
+      // Right rail
+      ctx.beginPath();
+      ctx.roundRect(ax + tunW - railW - 2, ay + 2, railW, tunH - 4, 3);
+      const rightRailGrad = ctx.createLinearGradient(ax + tunW - railW - 2, 0, ax + tunW - 2, 0);
+      rightRailGrad.addColorStop(0, '#475569');
+      rightRailGrad.addColorStop(0.5, '#cbd5e1');
+      rightRailGrad.addColorStop(1, '#94a3b8');
+      ctx.fillStyle = rightRailGrad;
+      ctx.fill();
+
+      // Center dark track lane
+      const trackLeft = ax + railW + 3;
+      const trackW = tunW - railW * 2 - 6;
+      ctx.beginPath();
+      ctx.roundRect(trackLeft, ay + 3, trackW, tunH - 6, 3);
+      ctx.fillStyle = '#090d16';
+      ctx.fill();
+      ctx.strokeStyle = '#1e293b';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Chevrons pointing towards the ready box (in local space, towards +Y mouth)
+      const chevY = ay + tunH * 0.68;
+      const chevW = Math.min(trackW * 0.65, 12);
+      ctx.strokeStyle = '#94a3b8';
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      // Chevron 1
+      ctx.beginPath();
+      ctx.moveTo(-chevW / 2, chevY - 4);
+      ctx.lineTo(0, chevY);
+      ctx.lineTo(chevW / 2, chevY - 4);
+      ctx.stroke();
+
+      // Chevron 2
+      ctx.beginPath();
+      ctx.moveTo(-chevW / 2, chevY + 4);
+      ctx.lineTo(0, chevY + 8);
+      ctx.lineTo(chevW / 2, chevY + 4);
+      ctx.stroke();
+
+      // Counter Number (remaining stored buses waiting in tunnel queue)
+      const storedCount = Math.max(0, tun.queue.length - 1);
+      const numY = ay + tunH * 0.32;
+      ctx.save();
+      ctx.translate(0, numY);
+      // Counter-rotate text so digit is ALWAYS upright and legible on screen
+      ctx.rotate(-(tun.angle * Math.PI) / 180);
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 3;
+      ctx.font = 'bold 15px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.strokeText(`${storedCount}`, 0, 0);
+      ctx.fillText(`${storedCount}`, 0, 0);
+      ctx.restore();
+
+      ctx.restore();
+
+      // 2. Draw the Ready Box in Front of the Tunnel (ALWAYS in opposite direction)
+      const readyBox = getTunnelReadyBox(tun);
+      if (readyBox) {
+        const bScreen = worldToScreen(readyBox.x, readyBox.z);
+        const bDim = BOX_DIMENSIONS[readyBox.numType] || BOX_DIMENSIONS.Box6;
+        const bW = bDim.width * zoom;
+        const bL = bDim.length * zoom;
+        const colDef = getWoolColor(readyBox.color);
+
+        ctx.save();
+        ctx.translate(bScreen.x, bScreen.y);
+        ctx.rotate((readyBox.angle * Math.PI) / 180);
+
+        // Box shadow
+        ctx.shadowColor = isSelected
+          ? 'rgba(250, 204, 21, 0.75)'
+          : isHovered
+          ? 'rgba(56, 189, 248, 0.6)'
+          : 'rgba(0, 0, 0, 0.45)';
+        ctx.shadowBlur = isSelected ? 14 : isHovered ? 10 : 5;
+        ctx.shadowOffsetY = 2;
+
+        const bx = -bW / 2;
+        const by = -bL / 2;
+        ctx.beginPath();
+        ctx.roundRect(bx, by, bW, bL, 6);
+
+        // Body knitted wool gradient
+        const bGrad = ctx.createLinearGradient(bx, by, bx + bW, by + bL);
+        bGrad.addColorStop(0, colDef.lightHex);
+        bGrad.addColorStop(0.5, colDef.hex);
+        bGrad.addColorStop(1, colDef.darkHex);
+        ctx.fillStyle = bGrad;
+        ctx.fill();
+
+        ctx.shadowColor = 'transparent';
+
+        // Knit texture lines
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.lineWidth = 1;
+        const ribCount = Math.floor(bL / 8);
+        for (let r = 0; r < ribCount; r++) {
+          const lineY = by + (r + 0.5) * (bL / ribCount);
+          ctx.beginPath();
+          ctx.moveTo(bx + 4, lineY);
+          ctx.lineTo(bx + bW - 4, lineY);
+          ctx.stroke();
+        }
+
+        // Box border
+        ctx.lineWidth = isSelected ? 2.5 : 1.5;
+        ctx.strokeStyle = isSelected ? '#facc15' : isHovered ? '#ffffff' : 'rgba(255, 255, 255, 0.7)';
+        ctx.beginPath();
+        ctx.roundRect(bx, by, bW, bL, 6);
+        ctx.stroke();
+
+        // Forward direction arrow (pointing along readyBox.angle, away from tunnel)
+        const arrowLength = Math.min(bL * 0.45, 18);
+        const arrowWidth = Math.min(bW * 0.42, 13);
+        const arrowTipY = -bL / 2 + 6;
+
+        ctx.beginPath();
+        ctx.moveTo(0, arrowTipY);
+        ctx.lineTo(-arrowWidth / 2, arrowTipY + arrowLength * 0.6);
+        ctx.lineTo(-arrowWidth / 5, arrowTipY + arrowLength * 0.6);
+        ctx.lineTo(-arrowWidth / 5, arrowTipY + arrowLength);
+        ctx.lineTo(arrowWidth / 5, arrowTipY + arrowLength);
+        ctx.lineTo(arrowWidth / 5, arrowTipY + arrowLength * 0.6);
+        ctx.lineTo(arrowWidth / 2, arrowTipY + arrowLength * 0.6);
+        ctx.closePath();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // Capacity badge pill (bottom of the box)
+        const pillW = Math.min(bW * 0.75, 24);
+        const pillH = 13;
+        const pillY = bL / 2 - pillH - 4;
+
+        ctx.beginPath();
+        ctx.roundRect(-pillW / 2, pillY, pillW, pillH, 6);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fill();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 9.5px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`${readyBox.capacity}`, 0, pillY + pillH / 2);
+
+        // Small Tunnel ready badge
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
+        ctx.font = '8px monospace';
+        ctx.fillText(`T#${tun.id}`, 0, 0);
+
+        ctx.restore();
+      }
     });
 
     // Draw Marquee box if active
@@ -719,6 +1314,12 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
     boxes,
     selectedBoxIds,
     hoveredBoxId,
+    tunnels,
+    selectedTunnelId,
+    hoveredTunnelId,
+    conveyors,
+    selectedConveyorId,
+    hoveredConveyorId,
     deadlockedIds,
     solutionOrderMap,
     showSolutionOrder,
@@ -750,10 +1351,49 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
     // Left click
     if (e.button === 0) {
       const worldPos = screenToWorld(mouseX, mouseY);
+
+      // 1. Check Tunnel click
+      const clickedTunnel = findTunnelAt(worldPos.x, worldPos.z);
+      if (clickedTunnel) {
+        sounds.playPop();
+        if (onSelectTunnel) onSelectTunnel(clickedTunnel.id);
+        if (onSelectConveyor) onSelectConveyor(null);
+        onSelectBoxes([]);
+        setIsDraggingTunnel(true);
+        setDragTunnelStart({
+          mouseX,
+          mouseY,
+          tunnelId: clickedTunnel.id,
+          startX: clickedTunnel.x,
+          startZ: clickedTunnel.z,
+        });
+        return;
+      }
+
+      // 2. Check Conveyor click
+      const clickedConveyor = findConveyorAt(worldPos.x, worldPos.z);
+      if (clickedConveyor) {
+        sounds.playPop();
+        if (onSelectConveyor) onSelectConveyor(clickedConveyor.id);
+        if (onSelectTunnel) onSelectTunnel(null);
+        onSelectBoxes([]);
+        setIsDraggingConveyor(true);
+        setDragConveyorStart({
+          mouseX,
+          mouseY,
+          conveyorId: clickedConveyor.id,
+          startZ: clickedConveyor.z,
+        });
+        return;
+      }
+
+      // 3. Check Box click
       const clickedBox = findBoxAt(worldPos.x, worldPos.z);
 
       if (clickedBox) {
         sounds.playPop();
+        if (onSelectTunnel) onSelectTunnel(null);
+        if (onSelectConveyor) onSelectConveyor(null);
 
         let newSelected: number[];
         if (e.shiftKey) {
@@ -789,6 +1429,8 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
         // Clicked on empty space: clear selection unless shift is held, start marquee
         if (!e.shiftKey) {
           onSelectBoxes([]);
+          if (onSelectTunnel) onSelectTunnel(null);
+          if (onSelectConveyor) onSelectConveyor(null);
         }
         setIsMarquee(true);
         setMarqueeStart({ x: mouseX, y: mouseY });
@@ -810,6 +1452,37 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
         x: mouseX - panStart.x,
         y: mouseY - panStart.y,
       });
+      return;
+    }
+
+    if (isDraggingTunnel && dragTunnelStart && onUpdateTunnels) {
+      const dxScreen = mouseX - dragTunnelStart.mouseX;
+      const dyScreen = mouseY - dragTunnelStart.mouseY;
+      const dxWorld = dxScreen / zoom;
+      const dzWorld = -dyScreen / zoom;
+      const updated = tunnels.map((t) => {
+        if (t.id !== dragTunnelStart.tunnelId) return t;
+        return {
+          ...t,
+          x: snapVal(dragTunnelStart.startX + dxWorld),
+          z: snapVal(dragTunnelStart.startZ + dzWorld),
+        };
+      });
+      onUpdateTunnels(updated);
+      return;
+    }
+
+    if (isDraggingConveyor && dragConveyorStart && onUpdateConveyors) {
+      const dyScreen = mouseY - dragConveyorStart.mouseY;
+      const dzWorld = -dyScreen / zoom;
+      const updated = conveyors.map((c) => {
+        if (c.id !== dragConveyorStart.conveyorId) return c;
+        return {
+          ...c,
+          z: snapVal(dragConveyorStart.startZ + dzWorld),
+        };
+      });
+      onUpdateConveyors(updated);
       return;
     }
 
@@ -848,12 +1521,28 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
     const worldPos = screenToWorld(mouseX, mouseY);
     const boxUnderMouse = findBoxAt(worldPos.x, worldPos.z);
     setHoveredBoxId(boxUnderMouse ? boxUnderMouse.id : null);
+
+    const tunnelUnderMouse = findTunnelAt(worldPos.x, worldPos.z);
+    setHoveredTunnelId(tunnelUnderMouse ? tunnelUnderMouse.id : null);
+
+    const conveyorUnderMouse = findConveyorAt(worldPos.x, worldPos.z);
+    setHoveredConveyorId(conveyorUnderMouse ? conveyorUnderMouse.id : null);
   };
 
   // Handle Mouse Up
   const handleMouseUp = () => {
     if (isPanning) {
       setIsPanning(false);
+    }
+
+    if (isDraggingTunnel) {
+      setIsDraggingTunnel(false);
+      setDragTunnelStart(null);
+    }
+
+    if (isDraggingConveyor) {
+      setIsDraggingConveyor(false);
+      setDragConveyorStart(null);
     }
 
     if (isDraggingBox) {

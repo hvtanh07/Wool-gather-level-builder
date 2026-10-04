@@ -120,3 +120,29 @@ export function getBoxNumType(capacity: number): BoxNumType {
   if (capacity <= 6) return 'Box6';
   return 'Box10';
 }
+
+export const ICE_THEME = {
+  frostHex: 'rgba(224, 242, 254, 0.82)',
+  cyanLightHex: '#bae6fd',
+  iceBorderHex: '#38bdf8',
+  iceGlow: 'rgba(56, 189, 248, 0.75)',
+};
+
+export const TUNNEL_THEME = {
+  frameHex: '#1e293b',
+  borderHex: '#475569',
+  portalHex: '#020617',
+  stripeYellow: '#facc15',
+  stripeDark: '#0f172a',
+  counterHex: '#fbbf24',
+};
+
+export const CONVEYOR_THEME = {
+  beltHex: '#1e293b',
+  borderHex: '#334155',
+  chevronHex: 'rgba(255, 255, 255, 0.18)',
+  activeZoneBorder: '#06b6d4',
+  activeZoneBg: 'rgba(6, 182, 212, 0.08)',
+  hoodHex: '#0f172a',
+  counterHex: '#38bdf8',
+};

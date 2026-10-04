@@ -13,6 +13,7 @@ import {
   HelpCircle,
   Volume2,
   VolumeX,
+  Trash2,
 } from 'lucide-react';
 
 interface TopNavbarProps {
@@ -21,6 +22,7 @@ interface TopNavbarProps {
   onStartPlaytest: () => void;
   onOpenImportExport: () => void;
   onLoadPreset: (presetName: string) => void;
+  onClearBoard?: () => void;
 }
 
 export const TopNavbar: React.FC<TopNavbarProps> = ({
@@ -29,6 +31,7 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
   onStartPlaytest,
   onOpenImportExport,
   onLoadPreset,
+  onClearBoard,
 }) => {
   const [soundOn, setSoundOn] = React.useState(true);
 
@@ -167,6 +170,18 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
         >
           {soundOn ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
         </button>
+
+        {/* Clear Board button */}
+        {onClearBoard && (
+          <button
+            onClick={onClearBoard}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/40 hover:border-rose-600 text-rose-300 hover:text-white text-xs font-semibold rounded-lg transition active:scale-95"
+            title="Clear all boxes, gimmicks, and dragon configuration"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+            <span className="hidden sm:inline">Clear Board</span>
+          </button>
+        )}
 
         {/* Import/Export Modal */}
         <button

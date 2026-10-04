@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { CleanLevelData, BoxItem, DragonSection } from '../types/level';
-import { BOX_DIMENSIONS, getWoolColor } from '../utils/colors';
-import { checkExitPath, angleToDirection } from '../utils/collision';
+import { CleanLevelData, BoxItem, DragonSection, TunnelSetup, ConveyorSetup, isBoxFrozen } from '../types/level';
+import { BOX_DIMENSIONS, getWoolColor, ICE_THEME, TUNNEL_THEME, CONVEYOR_THEME } from '../utils/colors';
+import { checkExitPath, angleToDirection, getTunnelReadyBox, isPointInTunnelCompound } from '../utils/collision';
 import { sounds } from '../utils/audio';
 import confetti from 'canvas-confetti';
 import {
@@ -50,6 +50,37 @@ interface YarnParticle {
   t: number; // 0 (at dragon) to 1 (at slot)
   startPos: { x: number; y: number };
   endPos: { x: number; y: number };
+}
+
+interface IceAttack {
+  id: number;
+  attackerBox: BoxItem;
+  startX: number;
+  startZ: number;
+  currentX: number;
+  currentZ: number;
+  targetBoxId: number;
+  dir: { x: number; z: number };
+  distance: number;
+  progress: number; // 0 to 1
+  state: 'forward' | 'returning';
+}
+
+interface IceParticle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  size: number;
+  alpha: number;
+  rot: number;
+  rotSpeed: number;
+  color: string;
+}
+
+interface TunnelDispenseAnim {
+  tunnelId: number;
+  progress: number;
 }
 
 // Fog covers the first 1/3 of the moving path (progress 0.0 to 1/3).
@@ -119,6 +150,11 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
       tailAnchorProgress: number;
       frontKnots: number;
     } | null;
+    tunnels: TunnelSetup[];
+    conveyors: ConveyorSetup[];
+    iceAttacks: IceAttack[];
+    iceParticles: IceParticle[];
+    tunnelDispenses: TunnelDispenseAnim[];
   }>({
     isPlaying: true,
     gameSpeed: 1.0,
@@ -138,6 +174,11 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
     boardZoomScale: 1.0,
     boardPanOffset: { x: 0, y: 0 },
     reconnectState: null,
+    tunnels: [],
+    conveyors: [],
+    iceAttacks: [],
+    iceParticles: [],
+    tunnelDispenses: [],
   });
 
   // Keep control props synced to engineRef
@@ -205,6 +246,11 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
       boardZoomScale: prevZoom,
       boardPanOffset: prevPan,
       reconnectState: null,
+      tunnels: JSON.parse(JSON.stringify(levelData.tunnels || [])),
+      conveyors: JSON.parse(JSON.stringify(levelData.conveyors || [])),
+      iceAttacks: [],
+      iceParticles: [],
+      tunnelDispenses: [],
     };
 
     setGameState('playing');
@@ -425,12 +471,121 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
           }
         }
 
+        // Update Conveyors: circulate boxes continuously
+        engine.conveyors.forEach((conv) => {
+          const dirSign = conv.direction === 'right-to-left' ? -1 : 1;
+          const minX = Math.min(conv.startX, conv.endX);
+          const maxX = Math.max(conv.startX, conv.endX);
+          const stepX = conv.speed * dt * dirSign;
+
+          conv.boxes.forEach((b) => {
+            b.x += stepX;
+            if (dirSign > 0 && b.x > maxX) {
+              b.x = minX + (b.x - maxX);
+            } else if (dirSign < 0 && b.x < minX) {
+              b.x = maxX - (minX - b.x);
+            }
+          });
+        });
+
+        // Update Ice Attacks (attacker rushing forward to collide & bounce back)
+        const canvas = canvasRef.current;
+        const curWidth = canvas?.clientWidth || 800;
+        const curHeight = canvas?.clientHeight || 600;
+
+        for (let i = engine.iceAttacks.length - 1; i >= 0; i--) {
+          const atk = engine.iceAttacks[i];
+          if (atk.state === 'forward') {
+            atk.progress += dt * 5.5;
+            if (atk.progress >= 1.0) {
+              atk.progress = 1.0;
+              atk.state = 'returning';
+
+              // Collision Impact!
+              sounds.playIceShatter();
+              sounds.playBounce();
+
+              // Unfreeze target box!
+              const target = engine.boardBoxes.find((b) => b.id === atk.targetBoxId);
+              if (target) {
+                target.boxType = 'Normal';
+                const targetScreen = boardToScreen(target.x, target.z, curWidth, curHeight);
+                engine.feedbacks.push({
+                  id: Date.now() + Math.random(),
+                  text: 'CRACK! ❄️💥',
+                  x: targetScreen.x,
+                  y: targetScreen.y - 18,
+                  color: '#38bdf8',
+                  lifetime: 1.0,
+                });
+
+                // Spawn flying ice crystal particles
+                for (let p = 0; p < 18; p++) {
+                  const ang = Math.random() * Math.PI * 2;
+                  const spd = 60 + Math.random() * 120;
+                  engine.iceParticles.push({
+                    x: targetScreen.x,
+                    y: targetScreen.y,
+                    vx: Math.cos(ang) * spd,
+                    vy: Math.sin(ang) * spd,
+                    size: 3 + Math.random() * 5,
+                    alpha: 1.0,
+                    rot: Math.random() * Math.PI * 2,
+                    rotSpeed: (Math.random() - 0.5) * 10,
+                    color: Math.random() > 0.4 ? '#bae6fd' : '#ffffff',
+                  });
+                }
+              }
+            }
+          } else if (atk.state === 'returning') {
+            atk.progress -= dt * 4.5;
+            if (atk.progress <= 0) {
+              atk.progress = 0;
+              engine.iceAttacks.splice(i, 1);
+            }
+          }
+
+          atk.currentX = atk.startX + atk.dir.x * (atk.distance * atk.progress);
+          atk.currentZ = atk.startZ + atk.dir.z * (atk.distance * atk.progress);
+        }
+
+        // Update Ice Particles
+        for (let p = engine.iceParticles.length - 1; p >= 0; p--) {
+          const pt = engine.iceParticles[p];
+          pt.x += pt.vx * dt;
+          pt.y += pt.vy * dt;
+          pt.vy += 70 * dt; // gravity
+          pt.rot += pt.rotSpeed * dt;
+          pt.alpha -= dt * 1.5;
+          if (pt.alpha <= 0) {
+            engine.iceParticles.splice(p, 1);
+          }
+        }
+
+        // Update Tunnel Dispense Animations
+        for (let d = engine.tunnelDispenses.length - 1; d >= 0; d--) {
+          const td = engine.tunnelDispenses[d];
+          td.progress += dt * 4.0;
+          if (td.progress >= 1.0) {
+            engine.tunnelDispenses.splice(d, 1);
+          }
+        }
+
         // Check Victory Condition:
         // Dragon has no wool left AND board is empty AND all slots cleared
+        // AND all tunnel queues emptied AND all conveyor boxes cleared
+        const isDragonClear = engine.dragonSections.length === 0;
+        const isBoardClear = engine.boardBoxes.length === 0 && engine.iceAttacks.length === 0;
+        const isSlotsClear = engine.slottedBoxes.every((sb) => sb === null);
+        const isTunnelsClear = engine.tunnels.every((t) => t.queue.length === 0);
+        const isConveyorsClear = engine.conveyors.every((c) => c.boxes.length === 0);
+
         if (
-          engine.dragonSections.length === 0 &&
-          engine.boardBoxes.length === 0 &&
-          engine.slottedBoxes.every((sb) => sb === null)
+          isDragonClear &&
+          isBoardClear &&
+          isSlotsClear &&
+          isTunnelsClear &&
+          isConveyorsClear
         ) {
           sounds.playVictory();
           engine.gameState = 'won';
@@ -1170,6 +1325,358 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
     ctx.fill();
     ctx.stroke();
 
+    // -------------------------------------------------------------
+    // DRAW CONVEYORS IN PLAYTEST
+    // -------------------------------------------------------------
+    engine.conveyors.forEach((conv) => {
+      const beltH = 0.85 * effectiveZoom;
+      const pStart = boardToScreen(conv.startX, conv.z, width, height);
+      const pEnd = boardToScreen(conv.endX, conv.z, width, height);
+      const minX = Math.min(pStart.x, pEnd.x);
+      const maxX = Math.max(pStart.x, pEnd.x);
+      const beltW = maxX - minX;
+      const beltY = pStart.y - beltH / 2;
+
+      ctx.save();
+
+      // Rubber belt
+      ctx.fillStyle = CONVEYOR_THEME.beltHex;
+      ctx.beginPath();
+      ctx.roundRect(minX, beltY, beltW, beltH, 6 * engine.boardZoomScale);
+      ctx.fill();
+      ctx.strokeStyle = CONVEYOR_THEME.borderHex;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Treads
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+      ctx.lineWidth = 1;
+      const treadStep = 12 * engine.boardZoomScale;
+      for (let tx = minX + 8; tx < maxX - 8; tx += treadStep) {
+        ctx.beginPath();
+        ctx.moveTo(tx, beltY + 3);
+        ctx.lineTo(tx, beltY + beltH - 3);
+        ctx.stroke();
+      }
+
+      // Direction chevrons
+      const isLTR = conv.direction === 'left-to-right';
+      ctx.fillStyle = CONVEYOR_THEME.chevronHex;
+      ctx.font = `bold ${Math.round(11 * engine.boardZoomScale)}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const chevCount = Math.max(3, Math.floor(beltW / (50 * engine.boardZoomScale)));
+      for (let i = 1; i < chevCount; i++) {
+        const cx = minX + (i * beltW) / chevCount;
+        ctx.fillText(isLTR ? '▶▶▶' : '◀◀◀', cx, beltY + beltH / 2);
+      }
+
+      // Active Pick Zone
+      const pActiveMin = boardToScreen(conv.activeZoneMinX, conv.z, width, height);
+      const pActiveMax = boardToScreen(conv.activeZoneMaxX, conv.z, width, height);
+      const activeLeft = Math.min(pActiveMin.x, pActiveMax.x);
+      const activeRight = Math.max(pActiveMin.x, pActiveMax.x);
+      const activeW = activeRight - activeLeft;
+
+      ctx.fillStyle = CONVEYOR_THEME.activeZoneBg;
+      ctx.fillRect(activeLeft, beltY, activeW, beltH);
+      ctx.strokeStyle = CONVEYOR_THEME.activeZoneBorder;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      ctx.strokeRect(activeLeft, beltY, activeW, beltH);
+      ctx.setLineDash([]);
+
+      // Label
+      ctx.fillStyle = '#67e8f9';
+      ctx.font = `bold ${Math.max(7, Math.round(8 * engine.boardZoomScale))}px monospace`;
+      ctx.fillText('⚡ PICK ZONE ⚡', activeLeft + activeW / 2, beltY + beltH - 5);
+
+      // Hoods at ends
+      const hoodW = Math.max(22, 0.65 * effectiveZoom);
+      ctx.fillStyle = CONVEYOR_THEME.hoodHex;
+      ctx.beginPath();
+      ctx.roundRect(minX - 2, beltY - 2, hoodW, beltH + 4, [6, 0, 0, 6]);
+      ctx.fill();
+      ctx.strokeStyle = '#475569';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.roundRect(maxX - hoodW + 2, beltY - 2, hoodW, beltH + 4, [0, 6, 6, 0]);
+      ctx.fill();
+      ctx.stroke();
+
+      // LED Counter Display: [ 🔄 CONV N ]
+      const badgeText = `🔄 ${conv.boxes.length}`;
+      ctx.fillStyle = '#0f172a';
+      ctx.beginPath();
+      ctx.roundRect(minX + 6, beltY - 16 * engine.boardZoomScale, 50 * engine.boardZoomScale, 14 * engine.boardZoomScale, 3);
+      ctx.fill();
+      ctx.strokeStyle = CONVEYOR_THEME.counterHex;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = CONVEYOR_THEME.counterHex;
+      ctx.font = `bold ${Math.round(8.5 * engine.boardZoomScale)}px monospace`;
+      ctx.fillText(badgeText, minX + 31 * engine.boardZoomScale, beltY - 9 * engine.boardZoomScale);
+
+      ctx.restore();
+
+      // Conveyor Buses
+      conv.boxes.forEach((cb) => {
+        const cScreen = boardToScreen(cb.x, conv.z, width, height);
+        const colDef = getWoolColor(cb.color);
+        const dim = BOX_DIMENSIONS[cb.numType] || BOX_DIMENSIONS.Box4;
+        const bW = dim.width * effectiveZoom;
+        const bL = dim.length * effectiveZoom;
+
+        ctx.save();
+        ctx.translate(cScreen.x, cScreen.y);
+        ctx.rotate((cb.angle * Math.PI) / 180);
+
+        ctx.shadowColor = 'rgba(0,0,0,0.3)';
+        ctx.shadowBlur = 4;
+        ctx.shadowOffsetY = 2;
+
+        const bx = -bW / 2;
+        const by = -bL / 2;
+        ctx.beginPath();
+        ctx.roundRect(bx, by, bW, bL, 5 * engine.boardZoomScale);
+
+        const bGrad = ctx.createLinearGradient(bx, by, bx + bW, by + bL);
+        bGrad.addColorStop(0, colDef.lightHex);
+        bGrad.addColorStop(0.5, colDef.hex);
+        bGrad.addColorStop(1, colDef.darkHex);
+        ctx.fillStyle = bGrad;
+        ctx.fill();
+
+        ctx.shadowColor = 'transparent';
+
+        const inActive = cb.x >= conv.activeZoneMinX && cb.x <= conv.activeZoneMaxX;
+        ctx.strokeStyle = inActive ? '#ffffff' : 'rgba(255,255,255,0.4)';
+        ctx.lineWidth = inActive ? Math.max(1.5, 2 * engine.boardZoomScale) : 1;
+        ctx.stroke();
+
+        const pW = Math.min(bW * 0.75, 24 * engine.boardZoomScale);
+        const pH = 12 * engine.boardZoomScale;
+        const pY = bL / 2 - pH - 3 * engine.boardZoomScale;
+        ctx.beginPath();
+        ctx.roundRect(-pW / 2, pY, pW, pH, 5 * engine.boardZoomScale);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `bold ${Math.round(8.5 * engine.boardZoomScale)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`${cb.capacity}`, 0, pY + pH / 2);
+
+        ctx.restore();
+      });
+    });
+
+    // -------------------------------------------------------------
+    // DRAW TUNNELS IN PLAYTEST (Shown as 2 objects: Tunnel structure & Ready Box in front)
+    // -------------------------------------------------------------
+    engine.tunnels.forEach((tun) => {
+      const tScreen = boardToScreen(tun.x, tun.z, width, height);
+      const tunDim = BOX_DIMENSIONS.Box6;
+      const tunW = tunDim.width * effectiveZoom;
+      const tunH = tunDim.length * effectiveZoom;
+
+      // 1. Draw the Tunnel Structure itself
+      ctx.save();
+      ctx.translate(tScreen.x, tScreen.y);
+      ctx.rotate((tun.angle * Math.PI) / 180);
+
+      // Shadow
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.65)';
+      ctx.shadowBlur = 8 * engine.boardZoomScale;
+
+      const ax = -tunW / 2;
+      const ay = -tunH / 2;
+      ctx.beginPath();
+      ctx.roundRect(ax, ay, tunW, tunH, 7 * engine.boardZoomScale);
+      const tunBodyGrad = ctx.createLinearGradient(ax, ay, ax + tunW, ay + tunH);
+      tunBodyGrad.addColorStop(0, '#334155');
+      tunBodyGrad.addColorStop(0.5, '#1e293b');
+      tunBodyGrad.addColorStop(1, '#0f172a');
+      ctx.fillStyle = tunBodyGrad;
+      ctx.fill();
+
+      ctx.shadowColor = 'transparent';
+
+      // Outer border
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = '#475569';
+      ctx.stroke();
+
+      // Side metallic rails (Left & Right bumpers)
+      const railW = Math.max(4, tunW * 0.16);
+
+      // Left rail
+      ctx.beginPath();
+      ctx.roundRect(ax + 2, ay + 2, railW, tunH - 4, 3 * engine.boardZoomScale);
+      const leftRailGrad = ctx.createLinearGradient(ax + 2, 0, ax + 2 + railW, 0);
+      leftRailGrad.addColorStop(0, '#94a3b8');
+      leftRailGrad.addColorStop(0.5, '#cbd5e1');
+      leftRailGrad.addColorStop(1, '#475569');
+      ctx.fillStyle = leftRailGrad;
+      ctx.fill();
+
+      // Right rail
+      ctx.beginPath();
+      ctx.roundRect(ax + tunW - railW - 2, ay + 2, railW, tunH - 4, 3 * engine.boardZoomScale);
+      const rightRailGrad = ctx.createLinearGradient(ax + tunW - railW - 2, 0, ax + tunW - 2, 0);
+      rightRailGrad.addColorStop(0, '#475569');
+      rightRailGrad.addColorStop(0.5, '#cbd5e1');
+      rightRailGrad.addColorStop(1, '#94a3b8');
+      ctx.fillStyle = rightRailGrad;
+      ctx.fill();
+
+      // Center dark track lane
+      const trackLeft = ax + railW + 3;
+      const trackW = tunW - railW * 2 - 6;
+      ctx.beginPath();
+      ctx.roundRect(trackLeft, ay + 3, trackW, tunH - 6, 3 * engine.boardZoomScale);
+      ctx.fillStyle = '#090d16';
+      ctx.fill();
+      ctx.strokeStyle = '#1e293b';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Chevrons pointing towards the ready box (in local space, towards +Y mouth)
+      const chevY = ay + tunH * 0.68;
+      const chevW = Math.min(trackW * 0.65, 12 * engine.boardZoomScale);
+      ctx.strokeStyle = '#94a3b8';
+      ctx.lineWidth = 2.5 * engine.boardZoomScale;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      // Chevron 1
+      ctx.beginPath();
+      ctx.moveTo(-chevW / 2, chevY - 4 * engine.boardZoomScale);
+      ctx.lineTo(0, chevY);
+      ctx.lineTo(chevW / 2, chevY - 4 * engine.boardZoomScale);
+      ctx.stroke();
+
+      // Chevron 2
+      ctx.beginPath();
+      ctx.moveTo(-chevW / 2, chevY + 4 * engine.boardZoomScale);
+      ctx.lineTo(0, chevY + 8 * engine.boardZoomScale);
+      ctx.lineTo(chevW / 2, chevY + 4 * engine.boardZoomScale);
+      ctx.stroke();
+
+      // Counter Number (remaining stored buses waiting in tunnel queue)
+      const storedCount = Math.max(0, tun.queue.length - 1);
+      const numY = ay + tunH * 0.32;
+      ctx.save();
+      ctx.translate(0, numY);
+      // Counter-rotate text so digit is ALWAYS upright and legible on screen
+      ctx.rotate(-(tun.angle * Math.PI) / 180);
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 3;
+      ctx.font = `bold ${Math.round(15 * engine.boardZoomScale)}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.strokeText(`${storedCount}`, 0, 0);
+      ctx.fillText(`${storedCount}`, 0, 0);
+      ctx.restore();
+
+      ctx.restore();
+
+      // 2. Draw the Ready Box in Front of the Tunnel (ALWAYS in opposite direction)
+      const readyBox = getTunnelReadyBox(tun);
+      if (readyBox) {
+        const bScreen = boardToScreen(readyBox.x, readyBox.z, width, height);
+        const bDim = BOX_DIMENSIONS[readyBox.numType] || BOX_DIMENSIONS.Box6;
+        const bW = bDim.width * effectiveZoom;
+        const bL = bDim.length * effectiveZoom;
+        const colDef = getWoolColor(readyBox.color);
+
+        ctx.save();
+        ctx.translate(bScreen.x, bScreen.y);
+        ctx.rotate((readyBox.angle * Math.PI) / 180);
+
+        // Box shadow
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
+        ctx.shadowBlur = 5 * engine.boardZoomScale;
+        ctx.shadowOffsetY = 2;
+
+        const bx = -bW / 2;
+        const by = -bL / 2;
+        ctx.beginPath();
+        ctx.roundRect(bx, by, bW, bL, 6 * engine.boardZoomScale);
+
+        // Body knitted wool gradient
+        const bGrad = ctx.createLinearGradient(bx, by, bx + bW, by + bL);
+        bGrad.addColorStop(0, colDef.lightHex);
+        bGrad.addColorStop(0.5, colDef.hex);
+        bGrad.addColorStop(1, colDef.darkHex);
+        ctx.fillStyle = bGrad;
+        ctx.fill();
+
+        ctx.shadowColor = 'transparent';
+
+        // Knit texture lines
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.lineWidth = 1;
+        const ribCount = Math.floor(bL / 8);
+        for (let r = 0; r < ribCount; r++) {
+          const lineY = by + (r + 0.5) * (bL / ribCount);
+          ctx.beginPath();
+          ctx.moveTo(bx + 4, lineY);
+          ctx.lineTo(bx + bW - 4, lineY);
+          ctx.stroke();
+        }
+
+        // Box border
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+        ctx.beginPath();
+        ctx.roundRect(bx, by, bW, bL, 6 * engine.boardZoomScale);
+        ctx.stroke();
+
+        // Forward direction arrow (pointing along readyBox.angle, away from tunnel)
+        const arrowLength = Math.min(bL * 0.45, 18 * engine.boardZoomScale);
+        const arrowWidth = Math.min(bW * 0.42, 13 * engine.boardZoomScale);
+        const arrowTipY = -bL / 2 + 6 * engine.boardZoomScale;
+
+        ctx.beginPath();
+        ctx.moveTo(0, arrowTipY);
+        ctx.lineTo(-arrowWidth / 2, arrowTipY + arrowLength * 0.6);
+        ctx.lineTo(-arrowWidth / 5, arrowTipY + arrowLength * 0.6);
+        ctx.lineTo(-arrowWidth / 5, arrowTipY + arrowLength);
+        ctx.lineTo(arrowWidth / 5, arrowTipY + arrowLength);
+        ctx.lineTo(arrowWidth / 5, arrowTipY + arrowLength * 0.6);
+        ctx.lineTo(arrowWidth / 2, arrowTipY + arrowLength * 0.6);
+        ctx.closePath();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // Capacity badge pill (bottom of the box)
+        const pillW = Math.min(bW * 0.75, 24 * engine.boardZoomScale);
+        const pillH = 13 * engine.boardZoomScale;
+        const pillY = bL / 2 - pillH - 4 * engine.boardZoomScale;
+
+        ctx.beginPath();
+        ctx.roundRect(-pillW / 2, pillY, pillW, pillH, 6 * engine.boardZoomScale);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fill();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `bold ${Math.round(9.5 * engine.boardZoomScale)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`${readyBox.capacity}`, 0, pillY + pillH / 2);
+
+        ctx.restore();
+      }
+    });
+
     // Check exit status for all board boxes
     const exitStatus = new Map<number, ReturnType<typeof checkExitPath>>();
     engine.boardBoxes.forEach((b) => {
@@ -1180,6 +1687,7 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
     engine.boardBoxes.forEach((b) => {
       const status = exitStatus.get(b.id);
       const isClear = !status?.isBlocked;
+      const isFrozen = isBoxFrozen(b);
       const colDef = getWoolColor(b.color);
       const dim = BOX_DIMENSIONS[b.numType] || BOX_DIMENSIONS.Box4;
 
@@ -1198,8 +1706,8 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
       ctx.rotate(rad);
 
       // Shadow
-      ctx.shadowColor = 'rgba(0, 0, 0, 0.25)';
-      ctx.shadowBlur = 6 * engine.boardZoomScale;
+      ctx.shadowColor = isFrozen ? 'rgba(56, 189, 248, 0.5)' : 'rgba(0, 0, 0, 0.25)';
+      ctx.shadowBlur = isFrozen ? 8 * engine.boardZoomScale : 6 * engine.boardZoomScale;
       ctx.shadowOffsetY = 3 * engine.boardZoomScale;
 
       // Box body
@@ -1232,9 +1740,35 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
         ctx.stroke();
       }
 
-      // Border: crisp white highlight if clear, dark border if blocked
-      ctx.lineWidth = isClear ? Math.max(1.5, 2 * engine.boardZoomScale) : 1;
-      ctx.strokeStyle = isClear ? '#ffffff' : 'rgba(0, 0, 0, 0.4)';
+      // Crystalline Ice overlay for Frozen Box
+      if (isFrozen) {
+        const iceGrad = ctx.createLinearGradient(rx, ry, rx + rw, ry + rh);
+        iceGrad.addColorStop(0, 'rgba(224, 242, 254, 0.85)');
+        iceGrad.addColorStop(0.5, 'rgba(186, 230, 253, 0.6)');
+        iceGrad.addColorStop(1, 'rgba(125, 211, 252, 0.85)');
+        ctx.fillStyle = iceGrad;
+        ctx.beginPath();
+        ctx.roundRect(rx, ry, rw, rh, Math.max(3, 6 * engine.boardZoomScale));
+        ctx.fill();
+
+        // Jagged ice crack lines
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.lineWidth = Math.max(1, 1.2 * engine.boardZoomScale);
+        ctx.beginPath();
+        ctx.moveTo(rx + 3, ry + 4);
+        ctx.lineTo(rx + rw * 0.35, ry + rh * 0.4);
+        ctx.lineTo(rx + rw * 0.2, ry + rh * 0.7);
+        ctx.moveTo(rx + rw - 3, ry + 6);
+        ctx.lineTo(rx + rw * 0.6, ry + rh * 0.35);
+        ctx.lineTo(rx + rw * 0.7, ry + rh * 0.75);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // Border: electric ice blue if frozen, crisp white if clear, dark border if blocked
+      ctx.lineWidth = isFrozen ? Math.max(2, 2.5 * engine.boardZoomScale) : isClear ? Math.max(1.5, 2 * engine.boardZoomScale) : 1;
+      ctx.strokeStyle = isFrozen ? '#7dd3fc' : isClear ? '#ffffff' : 'rgba(0, 0, 0, 0.4)';
       ctx.stroke();
 
       // Forward Direction Arrow
@@ -1274,6 +1808,102 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
       ctx.textBaseline = 'middle';
       ctx.fillText(`${b.capacity}`, 0, pillY + pillH / 2);
 
+      // Snowflake badge in corner for Frozen Box
+      if (isFrozen) {
+        const bSize = Math.max(12, 14 * engine.boardZoomScale);
+        const bX = rx + rw - bSize - 2;
+        const bY = ry + 2;
+        ctx.beginPath();
+        ctx.roundRect(bX, bY, bSize, bSize, 3);
+        ctx.fillStyle = 'rgba(12, 74, 110, 0.88)';
+        ctx.fill();
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        ctx.fillStyle = '#e0f2fe';
+        ctx.font = `${Math.round(8.5 * engine.boardZoomScale)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('❄️', bX + bSize / 2, bY + bSize / 2);
+      }
+
+      ctx.restore();
+    });
+
+    // -------------------------------------------------------------
+    // DRAW ATTACKING BUSES (UNFREEZING COLLISION RUSH & BOUNCE)
+    // -------------------------------------------------------------
+    engine.iceAttacks.forEach((atk) => {
+      const b = atk.attackerBox;
+      const colDef = getWoolColor(b.color);
+      const dim = BOX_DIMENSIONS[b.numType] || BOX_DIMENSIONS.Box4;
+      const sc = boardToScreen(atk.currentX, atk.currentZ, width, height);
+      const screenW = dim.width * effectiveZoom;
+      const screenL = dim.length * effectiveZoom;
+
+      ctx.save();
+      ctx.translate(sc.x, sc.y);
+      ctx.rotate((b.angle * Math.PI) / 180);
+
+      // Cyan rush glow
+      ctx.shadowColor = '#38bdf8';
+      ctx.shadowBlur = 12 * engine.boardZoomScale;
+
+      const rx = -screenW / 2;
+      const ry = -screenL / 2;
+      const rw = screenW;
+      const rh = screenL;
+
+      ctx.beginPath();
+      ctx.roundRect(rx, ry, rw, rh, Math.max(3, 6 * engine.boardZoomScale));
+      const grad = ctx.createLinearGradient(rx, ry, rx + rw, ry + rh);
+      grad.addColorStop(0, colDef.lightHex);
+      grad.addColorStop(0.5, colDef.hex);
+      grad.addColorStop(1, colDef.darkHex);
+      ctx.fillStyle = grad;
+      ctx.fill();
+
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2 * engine.boardZoomScale;
+      ctx.stroke();
+
+      // Capacity badge
+      const pillScale = Math.min(1.8, Math.max(0.7, engine.boardZoomScale));
+      const pillW = Math.min(screenW * 0.75, 26 * pillScale);
+      const pillH = 13 * pillScale;
+      const pillY = screenL / 2 - pillH - 3 * pillScale;
+      ctx.beginPath();
+      ctx.roundRect(-pillW / 2, pillY, pillW, pillH, 6 * pillScale);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = `bold ${Math.round(9 * pillScale)}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`${b.capacity}`, 0, pillY + pillH / 2);
+
+      ctx.restore();
+    });
+
+    // -------------------------------------------------------------
+    // DRAW ICE SHATTER PARTICLES
+    // -------------------------------------------------------------
+    engine.iceParticles.forEach((pt) => {
+      ctx.save();
+      ctx.translate(pt.x, pt.y);
+      ctx.rotate(pt.rot);
+      ctx.globalAlpha = Math.max(0, pt.alpha);
+      ctx.fillStyle = pt.color;
+      ctx.shadowColor = '#38bdf8';
+      ctx.shadowBlur = 4;
+      ctx.beginPath();
+      ctx.moveTo(0, -pt.size);
+      ctx.lineTo(pt.size * 0.7, 0);
+      ctx.lineTo(0, pt.size);
+      ctx.lineTo(-pt.size * 0.7, 0);
+      ctx.closePath();
+      ctx.fill();
       ctx.restore();
     });
 
@@ -1412,16 +2042,211 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
     // Screen to World for board area
     const { x: wx, z: wz } = screenToBoard(mouseX, mouseY, width, height);
 
-    // Find clicked box on board
+    // -------------------------------------------------------------
+    // 1. Check Clicks on Tunnels (Warehouse Dispenser)
+    // -------------------------------------------------------------
+    for (const tun of engine.tunnels) {
+      if (tun.queue.length === 0) continue;
+      if (isPointInTunnelCompound(wx, wz, tun)) {
+        const readyBox = getTunnelReadyBox(tun);
+        if (!readyBox) continue;
+
+        const exitRes = checkExitPath(readyBox, engine.boardBoxes);
+        const boxSc = boardToScreen(readyBox.x, readyBox.z, width, height);
+        const dir = angleToDirection(readyBox.angle);
+
+        if (exitRes.isBlocked) {
+          // If blocked by a frozen bus, launch unfreezing attack!
+          if (exitRes.blockingBoxId) {
+            const blocker = engine.boardBoxes.find((b) => b.id === exitRes.blockingBoxId);
+            if (blocker && isBoxFrozen(blocker)) {
+              sounds.playWhoosh();
+              engine.iceAttacks.push({
+                id: Date.now(),
+                attackerBox: readyBox,
+                startX: readyBox.x,
+                startZ: readyBox.z,
+                currentX: readyBox.x,
+                currentZ: readyBox.z,
+                targetBoxId: blocker.id,
+                dir,
+                distance: exitRes.distanceToBlocker || 1.0,
+                progress: 0,
+                state: 'forward',
+              });
+              return;
+            }
+          }
+
+          sounds.playBlocked();
+          engine.feedbacks.push({
+            id: Date.now(),
+            text: 'Tunnel Exit Blocked! ❌',
+            x: boxSc.x,
+            y: boxSc.y - 20,
+            color: '#ef4444',
+            lifetime: 1.0,
+          });
+          return;
+        }
+
+        // Empty slot check
+        const emptySlotIdx = engine.slottedBoxes.findIndex((s) => s === null);
+        if (emptySlotIdx === -1) {
+          sounds.playBlocked();
+          engine.feedbacks.push({
+            id: Date.now(),
+            text: 'All Slots Full! ⚠️',
+            x: boxSc.x,
+            y: boxSc.y - 20,
+            color: '#f59e0b',
+            lifetime: 1.0,
+          });
+          return;
+        }
+
+        // Launch ready bus into slot!
+        sounds.playWhoosh();
+        const launched = tun.queue.shift()!;
+        engine.slottedBoxes[emptySlotIdx] = {
+          box: {
+            ...launched,
+            x: readyBox.x,
+            z: readyBox.z,
+            angle: readyBox.angle,
+          },
+          filled: 0,
+          capacity: launched.capacity,
+          color: launched.color,
+          slotIndex: emptySlotIdx,
+          flyProgress: 0,
+          sourceScreenPos: { x: boxSc.x, y: boxSc.y },
+        };
+
+        // Instantly dispense next bus from queue!
+        if (tun.queue.length > 0) {
+          sounds.playTunnelDispense();
+          engine.tunnelDispenses.push({ tunnelId: tun.id, progress: 0 });
+        }
+        return;
+      }
+    }
+
+    // -------------------------------------------------------------
+    // 2. Check Clicks on Conveyor Belts
+    // -------------------------------------------------------------
+    for (const conv of engine.conveyors) {
+      if (Math.abs(wz - conv.z) <= 0.45) {
+        const clickedConvBox = conv.boxes.find((cb) => {
+          const dim = BOX_DIMENSIONS[cb.numType] || BOX_DIMENSIONS.Box4;
+          return Math.abs(wx - cb.x) <= dim.width / 2 && Math.abs(wz - conv.z) <= dim.length / 2;
+        });
+
+        if (clickedConvBox) {
+          const minActive = Math.min(conv.activeZoneMinX, conv.activeZoneMaxX);
+          const maxActive = Math.max(conv.activeZoneMinX, conv.activeZoneMaxX);
+          const inActiveZone = clickedConvBox.x >= minActive && clickedConvBox.x <= maxActive;
+          const boxSc = boardToScreen(clickedConvBox.x, conv.z, width, height);
+
+          if (!inActiveZone) {
+            sounds.playBlocked();
+            engine.shakingBoxId = clickedConvBox.id;
+            engine.shakeTimer = 0.35;
+            engine.feedbacks.push({
+              id: Date.now(),
+              text: 'Outside Active Zone! ⚠️',
+              x: boxSc.x,
+              y: boxSc.y - 20,
+              color: '#f59e0b',
+              lifetime: 1.0,
+            });
+            return;
+          }
+
+          // Slot check
+          const emptySlotIdx = engine.slottedBoxes.findIndex((s) => s === null);
+          if (emptySlotIdx === -1) {
+            sounds.playBlocked();
+            engine.shakingBoxId = clickedConvBox.id;
+            engine.shakeTimer = 0.4;
+            engine.feedbacks.push({
+              id: Date.now(),
+              text: 'All Slots Full! ⚠️',
+              x: boxSc.x,
+              y: boxSc.y - 20,
+              color: '#f59e0b',
+              lifetime: 1.0,
+            });
+            return;
+          }
+
+          // Launch conveyor box into slot
+          sounds.playWhoosh();
+          engine.slottedBoxes[emptySlotIdx] = {
+            box: clickedConvBox,
+            filled: 0,
+            capacity: clickedConvBox.capacity,
+            color: clickedConvBox.color,
+            slotIndex: emptySlotIdx,
+            flyProgress: 0,
+            sourceScreenPos: { x: boxSc.x, y: boxSc.y },
+          };
+          conv.boxes = conv.boxes.filter((b) => b.id !== clickedConvBox.id);
+          return;
+        }
+      }
+    }
+
+    // -------------------------------------------------------------
+    // 3. Check Clicks on Board Boxes
+    // -------------------------------------------------------------
     const clickedBox = findBoardBoxAt(wx, wz, engine.boardBoxes);
     if (!clickedBox) return;
 
     const boxSc = boardToScreen(clickedBox.x, clickedBox.z, width, height);
 
+    // If box is Frozen: locked in place, cannot be directly selected!
+    if (isBoxFrozen(clickedBox)) {
+      sounds.playIceShake();
+      engine.shakingBoxId = clickedBox.id;
+      engine.shakeTimer = 0.4;
+      engine.feedbacks.push({
+        id: Date.now(),
+        text: 'Frozen! ❄️ Launch a bus to break ice',
+        x: boxSc.x,
+        y: boxSc.y - 20,
+        color: '#38bdf8',
+        lifetime: 1.0,
+      });
+      return;
+    }
+
     // Check exit path
     const exitRes = checkExitPath(clickedBox, engine.boardBoxes);
 
     if (exitRes.isBlocked) {
+      // Check if blocker is Frozen: if so, LAUNCH UNFREEZING ATTACK!
+      if (exitRes.blockingBoxId) {
+        const blocker = engine.boardBoxes.find((b) => b.id === exitRes.blockingBoxId);
+        if (blocker && isBoxFrozen(blocker)) {
+          sounds.playWhoosh();
+          engine.iceAttacks.push({
+            id: Date.now(),
+            attackerBox: clickedBox,
+            startX: clickedBox.x,
+            startZ: clickedBox.z,
+            currentX: clickedBox.x,
+            currentZ: clickedBox.z,
+            targetBoxId: blocker.id,
+            dir: angleToDirection(clickedBox.angle),
+            distance: exitRes.distanceToBlocker || 1.0,
+            progress: 0,
+            state: 'forward',
+          });
+          return;
+        }
+      }
+
       sounds.playBlocked();
       engine.shakingBoxId = clickedBox.id;
       engine.shakeTimer = 0.4;

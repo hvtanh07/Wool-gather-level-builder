@@ -220,6 +220,107 @@ class SoundEffects {
       // Ignore
     }
   }
+
+  // Ice block shatter with glass/crystalline crack and burst
+  playIceShatter() {
+    if (!this.enabled) return;
+    try {
+      this.initCtx();
+      if (!this.ctx) return;
+      // High glass chirps
+      const freqs = [1800, 2400, 3200, 4100];
+      freqs.forEach((f, idx) => {
+        const osc = this.ctx!.createOscillator();
+        const gain = this.ctx!.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(f, this.ctx!.currentTime + idx * 0.02);
+        osc.frequency.exponentialRampToValueAtTime(f * 0.4, this.ctx!.currentTime + idx * 0.02 + 0.15);
+
+        gain.gain.setValueAtTime(0.18, this.ctx!.currentTime + idx * 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.005, this.ctx!.currentTime + idx * 0.02 + 0.18);
+
+        osc.connect(gain);
+        gain.connect(this.ctx!.destination);
+        osc.start(this.ctx!.currentTime + idx * 0.02);
+        osc.stop(this.ctx!.currentTime + idx * 0.02 + 0.2);
+      });
+    } catch {
+      // Ignore
+    }
+  }
+
+  // Rubber / spring bounce thud when attacking bus bounces back
+  playBounce() {
+    if (!this.enabled) return;
+    try {
+      this.initCtx();
+      if (!this.ctx) return;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(320, this.ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(140, this.ctx.currentTime + 0.14);
+
+      gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.15);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start();
+      osc.stop(this.ctx.currentTime + 0.16);
+    } catch {
+      // Ignore
+    }
+  }
+
+  // Tunnel portal bus emergence / dispense whoosh and metallic click
+  playTunnelDispense() {
+    if (!this.enabled) return;
+    try {
+      this.initCtx();
+      if (!this.ctx) return;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(180, this.ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(520, this.ctx.currentTime + 0.15);
+
+      gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.18);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start();
+      osc.stop(this.ctx.currentTime + 0.2);
+    } catch {
+      // Ignore
+    }
+  }
+
+  // Frosty rattle / locked shake sound when clicking an encased ice bus
+  playIceShake() {
+    if (!this.enabled) return;
+    try {
+      this.initCtx();
+      if (!this.ctx) return;
+      const notes = [1200, 1500, 1100];
+      notes.forEach((f, idx) => {
+        const osc = this.ctx!.createOscillator();
+        const gain = this.ctx!.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(f, this.ctx!.currentTime + idx * 0.04);
+        gain.gain.setValueAtTime(0.08, this.ctx!.currentTime + idx * 0.04);
+        gain.gain.exponentialRampToValueAtTime(0.005, this.ctx!.currentTime + idx * 0.04 + 0.05);
+
+        osc.connect(gain);
+        gain.connect(this.ctx!.destination);
+        osc.start(this.ctx!.currentTime + idx * 0.04);
+        osc.stop(this.ctx!.currentTime + idx * 0.04 + 0.06);
+      });
+    } catch {
+      // Ignore
+    }
+  }
 }
 
 export const sounds = new SoundEffects();
