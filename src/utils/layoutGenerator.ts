@@ -188,10 +188,11 @@ export function generateRandomTightLayout(targetCount = 49): BoxItem[] {
     }
   }
 
-  // Pass 3: Reverse-Unpeeling Topological Angle Assignment
+  // Pass 3: Reverse-Unpeeling Topological Angle Assignment & Clearance Order
   // Simulates clearing the board backwards to guarantee 100% solvability
   let remaining = [...boxes];
   const chosenAngles = new Map<number, number>();
+  const exitOrder: number[] = [];
 
   while (remaining.length > 0) {
     let found = false;
@@ -205,6 +206,7 @@ export function generateRandomTightLayout(targetCount = 49): BoxItem[] {
       for (const ang of allowedAngles) {
         if (canBoxExitInDirection(b, ang, remaining)) {
           chosenAngles.set(b.id, ang);
+          exitOrder.push(b.id);
           remaining = remaining.filter((item) => item.id !== b.id);
           found = true;
           break;
@@ -220,19 +222,91 @@ export function generateRandomTightLayout(targetCount = 49): BoxItem[] {
         ? fallback.z > -2.4 ? 0 : 180
         : fallback.x > 0 ? 90 : 270;
       chosenAngles.set(fallback.id, fallbackAngle);
+      exitOrder.push(fallback.id);
       remaining.splice(0, 1);
     }
   }
 
-  // Pass 4: Balanced Wool Color Palette Assignment
-  const palette: number[] = [];
-  const countPerColor = Math.ceil(boxes.length / 8);
-  for (let c = 1; c <= 8; c++) {
-    for (let i = 0; i < countPerColor; i++) {
-      palette.push(c);
-    }
+  // Pass 4: 3-Layer Color Palette Assignment (Outer, Middle, Inner)
+  // Outer layer: 3 colors
+  // Middle layer: 3 colors (shares 1 or 2 with outer)
+  // Inner layer: 3 colors (shares 1 or 2 with middle)
+  const cx = (minX + maxX) / 2; // 0
+  const cz = (minZ + maxZ) / 2; // -2.4
+  const hw = (maxX - minX) / 2; // 2.85
+  const hh = (maxZ - minZ) / 2; // 3.05
+  const N = boxes.length;
+
+  const boxScores = boxes.map((b) => {
+    const rank = exitOrder.indexOf(b.id);
+    const dTopo = N > 1 ? 1 - (rank >= 0 ? rank : N - 1) / (N - 1) : 1;
+    const dx = Math.abs(b.x - cx) / hw;
+    const dz = Math.abs(b.z - cz) / hh;
+    const dGeo = Math.max(dx, dz);
+    const layerScore = 0.55 * dTopo + 0.45 * dGeo;
+    return { box: b, layerScore };
+  });
+
+  // Sort descending: highest layerScore is outermost, lowest is innermost
+  boxScores.sort((a, b) => b.layerScore - a.layerScore);
+
+  const outerCount = Math.floor(N / 3);
+  const middleCount = Math.floor(N / 3);
+  const outerBoxes = boxScores.slice(0, outerCount).map((item) => item.box);
+  const middleBoxes = boxScores.slice(outerCount, outerCount + middleCount).map((item) => item.box);
+  const innerBoxes = boxScores.slice(outerCount + middleCount).map((item) => item.box);
+
+  // Palettes generation:
+  const allShuffled = [1, 2, 3, 4, 5, 6, 7, 8].sort(() => Math.random() - 0.5);
+  const outerColors = [allShuffled[0], allShuffled[1], allShuffled[2]];
+
+  const shareOuterMiddle = Math.random() < 0.5 ? 1 : 2;
+  const shuffledOuter = [...outerColors].sort(() => Math.random() - 0.5);
+  const sharedFromOuter = shuffledOuter.slice(0, shareOuterMiddle);
+  const neededForMiddle = 3 - shareOuterMiddle;
+  const unusedForMiddle = allShuffled.slice(3);
+  const middleNew = unusedForMiddle.slice(0, neededForMiddle);
+  const middleColors = [...sharedFromOuter, ...middleNew];
+
+  const shareMiddleInner = Math.random() < 0.5 ? 1 : 2;
+  const shuffledMiddle = [...middleColors].sort(() => Math.random() - 0.5);
+  const sharedFromMiddle = shuffledMiddle.slice(0, shareMiddleInner);
+  const neededForInner = 3 - shareMiddleInner;
+  const remainingUnused = allShuffled.filter(
+    (c) => !middleColors.includes(c) && !sharedFromMiddle.includes(c)
+  );
+  let innerNew = remainingUnused.slice(0, neededForInner);
+  if (innerNew.length < neededForInner) {
+    const fallbackPool = [1, 2, 3, 4, 5, 6, 7, 8].filter(
+      (c) => !sharedFromMiddle.includes(c) && !innerNew.includes(c)
+    );
+    fallbackPool.sort(() => Math.random() - 0.5);
+    innerNew = [...innerNew, ...fallbackPool.slice(0, neededForInner - innerNew.length)];
   }
-  palette.sort(() => Math.random() - 0.5);
+  const innerColors = [...sharedFromMiddle, ...innerNew];
+
+  function createLayerColorArray(count: number, colors: number[]): number[] {
+    const result: number[] = [];
+    const baseCount = Math.floor(count / colors.length);
+    const remainder = count % colors.length;
+    for (let i = 0; i < colors.length; i++) {
+      const num = baseCount + (i < remainder ? 1 : 0);
+      for (let k = 0; k < num; k++) {
+        result.push(colors[i]);
+      }
+    }
+    result.sort(() => Math.random() - 0.5);
+    return result;
+  }
+
+  const outerColorList = createLayerColorArray(outerBoxes.length, outerColors);
+  const middleColorList = createLayerColorArray(middleBoxes.length, middleColors);
+  const innerColorList = createLayerColorArray(innerBoxes.length, innerColors);
+
+  const boxColorMap = new Map<number, number>();
+  outerBoxes.forEach((b, i) => boxColorMap.set(b.id, outerColorList[i]));
+  middleBoxes.forEach((b, i) => boxColorMap.set(b.id, middleColorList[i]));
+  innerBoxes.forEach((b, i) => boxColorMap.set(b.id, innerColorList[i]));
 
   const finalBoxes: BoxItem[] = boxes.map((b, idx) => {
     const angle = chosenAngles.get(b.id) ?? (b.isVert ? 0 : 90);
@@ -243,7 +317,7 @@ export function generateRandomTightLayout(targetCount = 49): BoxItem[] {
       angle,
       numType: b.numType,
       capacity: b.capacity,
-      color: palette[idx % palette.length],
+      color: boxColorMap.get(b.id) ?? 1,
       boxType: 'Normal',
     };
   });
