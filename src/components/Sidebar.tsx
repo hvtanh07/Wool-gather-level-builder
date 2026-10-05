@@ -115,7 +115,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const [conveyorAddNumType, setConveyorAddNumType] = useState<BoxNumType>('Box6');
   const [conveyorAddColor, setConveyorAddColor] = useState<number>(3);
-  const [conveyorAddAngle, setConveyorAddAngle] = useState<number>(0);
 
   const selectedBoxes = boxes.filter((b) => selectedBoxIds.includes(b.id));
   const singleSelected = selectedBoxes.length === 1 ? selectedBoxes[0] : null;
@@ -978,22 +977,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       <button
                         onClick={() => {
                           sounds.playPop();
-                          const q = selectedConveyor.boxes.map((item, i) =>
-                            i === idx ? { ...item, angle: ((item.angle || 0) + 90) % 360 } : item
-                          );
-                          onUpdateConveyors?.(
-                            conveyors.map((c) => (c.id === selectedConveyor.id ? { ...c, boxes: q } : c))
-                          );
-                        }}
-                        className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-mono text-cyan-400 border border-slate-700"
-                        title="Click to rotate 90°"
-                      >
-                        {b.angle || 0}°
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          sounds.playPop();
                           const remaining = selectedConveyor.boxes.filter((_, i) => i !== idx);
                           const updated = evenlySpreadConveyorBoxes(
                             remaining,
@@ -1007,8 +990,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           );
                         }}
                         className="p-1 text-slate-500 hover:text-rose-400"
+                        title="Delete box"
                       >
-                        <Trash2 className="w-3 h-3" />
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   </div>
@@ -1039,90 +1023,88 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </button>
             )}
 
-            {/* Add Bus to Belt Tool */}
-            <div className="p-2 bg-slate-900 border border-slate-800 rounded-lg space-y-1.5">
-              <span className="text-[10px] text-slate-400 block font-semibold">
-                + Add Bus to Conveyor Belt
+            {/* Add Box to Belt Tool */}
+            <div className="p-2.5 bg-slate-900 border border-slate-800 rounded-lg space-y-2">
+              <span className="text-[10px] text-cyan-300 block font-semibold uppercase tracking-wider">
+                + Add Box to Conveyor
               </span>
-              <div className="flex items-center justify-between gap-1">
-                <div className="flex items-center gap-1">
-                  {(['Box4', 'Box6', 'Box10'] as BoxNumType[]).map((nt) => (
-                    <button
-                      key={nt}
-                      onClick={() => setConveyorAddNumType(nt)}
-                      className={`px-1.5 py-0.5 rounded text-[10px] font-mono border ${
-                        conveyorAddNumType === nt
-                          ? 'bg-cyan-600 text-white border-cyan-400'
-                          : 'bg-slate-800 text-slate-400 border-slate-700'
-                      }`}
-                    >
-                      {nt}
-                    </button>
-                  ))}
-                </div>
 
-                <div className="flex items-center gap-1">
-                  {[0, 180, 90, 270].map((deg) => (
-                    <button
-                      key={deg}
-                      onClick={() => setConveyorAddAngle(deg)}
-                      className={`px-1.5 py-0.5 rounded text-[10px] font-mono border ${
-                        conveyorAddAngle === deg
-                          ? 'bg-cyan-600 text-white border-cyan-400 font-bold'
-                          : 'bg-slate-800 text-slate-400 border-slate-700'
-                      }`}
-                      title={`Direction ${deg}°`}
-                    >
-                      {deg}°
-                    </button>
-                  ))}
+              {/* Box Capacity Type */}
+              <div>
+                <label className="text-[10px] text-slate-400 block mb-1">Capacity</label>
+                <div className="grid grid-cols-3 gap-1">
+                  {(['Box4', 'Box6', 'Box10'] as BoxNumType[]).map((nt) => {
+                    const cap = BOX_DIMENSIONS[nt].capacity;
+                    const isSelected = conveyorAddNumType === nt;
+                    return (
+                      <button
+                        key={nt}
+                        onClick={() => setConveyorAddNumType(nt)}
+                        className={`py-1 px-1 rounded text-[11px] font-mono font-medium border text-center transition ${
+                          isSelected
+                            ? 'bg-cyan-600 text-white border-cyan-400 shadow-sm'
+                            : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-750'
+                        }`}
+                      >
+                        {nt} ({cap})
+                      </button>
+                    );
+                  })}
                 </div>
-
-                <button
-                  onClick={() => {
-                    sounds.playPop();
-                    const newId = Date.now();
-                    const cap = BOX_DIMENSIONS[conveyorAddNumType].capacity;
-                    const newBus: BoxItem = {
-                      id: newId,
-                      x: 0,
-                      z: selectedConveyor.z,
-                      angle: conveyorAddAngle,
-                      numType: conveyorAddNumType,
-                      capacity: cap,
-                      color: conveyorAddColor,
-                      boxType: 'Normal',
-                    };
-                    const updated = evenlySpreadConveyorBoxes(
-                      [...selectedConveyor.boxes, newBus],
-                      selectedConveyor.startX,
-                      selectedConveyor.endX
-                    );
-                    onUpdateConveyors?.(
-                      conveyors.map((c) =>
-                        c.id === selectedConveyor.id ? { ...c, boxes: updated } : c
-                      )
-                    );
-                  }}
-                  className="px-2 py-0.5 bg-cyan-600 hover:bg-cyan-500 text-white text-[11px] font-semibold rounded shadow transition"
-                >
-                  Add
-                </button>
               </div>
 
-              {/* Color swatch row */}
-              <div className="flex items-center gap-1 pt-0.5">
-                {Object.values(WOOL_COLORS).map((c) => (
-                  <button
-                    key={c.id}
-                    onClick={() => setConveyorAddColor(c.id)}
-                    className={`w-4 h-4 rounded-full transition-transform ${
-                      conveyorAddColor === c.id ? 'ring-2 ring-white scale-110' : 'opacity-70 hover:opacity-100'
-                    }`}
-                    style={{ backgroundColor: c.hex }}
-                  />
-                ))}
+              {/* Color Swatch Row */}
+              <div>
+                <label className="text-[10px] text-slate-400 block mb-1">Color</label>
+                <div className="flex items-center justify-between gap-1 px-1.5 py-1 bg-slate-950/60 rounded border border-slate-800/80">
+                  {Object.values(WOOL_COLORS).map((c) => (
+                    <button
+                      key={c.id}
+                      onClick={() => setConveyorAddColor(c.id)}
+                      title={c.name}
+                      className={`w-4 h-4 rounded-full transition-transform ${
+                        conveyorAddColor === c.id
+                          ? 'ring-2 ring-white scale-125 z-10 shadow'
+                          : 'opacity-70 hover:opacity-100 hover:scale-110'
+                      }`}
+                      style={{ backgroundColor: c.hex }}
+                    />
+                  ))}
+                </div>
               </div>
+
+              {/* Prominent Add Box Button */}
+              <button
+                onClick={() => {
+                  sounds.playPop();
+                  const newId = Date.now();
+                  const cap = BOX_DIMENSIONS[conveyorAddNumType].capacity;
+                  const newBus: BoxItem = {
+                    id: newId,
+                    x: 0,
+                    z: selectedConveyor.z,
+                    angle: 0,
+                    numType: conveyorAddNumType,
+                    capacity: cap,
+                    color: conveyorAddColor,
+                    boxType: 'Normal',
+                  };
+                  const updated = evenlySpreadConveyorBoxes(
+                    [...selectedConveyor.boxes, newBus],
+                    selectedConveyor.startX,
+                    selectedConveyor.endX
+                  );
+                  onUpdateConveyors?.(
+                    conveyors.map((c) =>
+                      c.id === selectedConveyor.id ? { ...c, boxes: updated } : c
+                    )
+                  );
+                }}
+                className="w-full py-2 bg-cyan-600 hover:bg-cyan-500 active:bg-cyan-700 text-white text-xs font-semibold rounded-lg shadow-md transition flex items-center justify-center gap-1.5 active:scale-[0.98]"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add Box to Conveyor</span>
+              </button>
             </div>
           </div>
 
