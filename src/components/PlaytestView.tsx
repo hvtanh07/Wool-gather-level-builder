@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { CleanLevelData, BoxItem, DragonSection, TunnelSetup, ConveyorSetup, isBoxFrozen } from '../types/level';
+import { CleanLevelData, BoxItem, DragonSection, TunnelSetup, ConveyorSetup, isBoxFrozen, BoxNumType } from '../types/level';
 import { BOX_DIMENSIONS, getWoolColor, ICE_THEME, TUNNEL_THEME, CONVEYOR_THEME } from '../utils/colors';
 import { checkExitPath, angleToDirection, getTunnelReadyBox, isPointInTunnelCompound } from '../utils/collision';
 import { sounds } from '../utils/audio';
@@ -264,6 +264,55 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
   useEffect(() => {
     resetGame();
   }, [resetGame]);
+
+  // Helper to collect all obstacles for exit path calculations in playtest:
+  // includes board boxes, tunnel structures and ready-boxes, and conveyor boxes (excluding excludeBoxId)
+  const getAllObstacles = useCallback((excludeBoxId?: number): BoxItem[] => {
+    const engine = engineRef.current;
+    if (!engine) return [];
+    const obstacles: BoxItem[] = [];
+
+    // 1. Board boxes
+    for (const b of engine.boardBoxes) {
+      if (b.id !== excludeBoxId) {
+        obstacles.push(b);
+      }
+    }
+
+    // 2. Tunnel structures and ready boxes
+    for (const tun of engine.tunnels) {
+      if (tun.queue.length > 0) {
+        const readyBox = getTunnelReadyBox(tun);
+        if (readyBox && readyBox.id !== excludeBoxId) {
+          obstacles.push(readyBox);
+        }
+      }
+      obstacles.push({
+        id: -tun.id * 100,
+        x: tun.x,
+        z: tun.z,
+        angle: tun.angle,
+        color: 0,
+        numType: 'Box6' as BoxNumType,
+        capacity: 0,
+      });
+    }
+
+    // 3. Conveyor boxes
+    for (const conv of engine.conveyors) {
+      for (const cb of conv.boxes) {
+        if (cb.id !== excludeBoxId) {
+          obstacles.push({
+            ...cb,
+            x: cb.x,
+            z: conv.z,
+          });
+        }
+      }
+    }
+
+    return obstacles;
+  }, []);
 
   // Main continuous 60fps Game Loop
   useEffect(() => {
@@ -1419,6 +1468,15 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
 
       // Conveyor Buses
       conv.boxes.forEach((cb) => {
+        if (engine.iceAttacks.some((atk) => atk.attackerBox.id === cb.id)) {
+          return;
+        }
+
+        let shakeOffsetX = 0;
+        if (engine.shakingBoxId === cb.id) {
+          shakeOffsetX = Math.sin(performance.now() * 0.05) * 5;
+        }
+
         const cScreen = boardToScreen(cb.x, conv.z, width, height);
         const colDef = getWoolColor(cb.color);
         const dim = BOX_DIMENSIONS[cb.numType] || BOX_DIMENSIONS.Box4;
@@ -1426,7 +1484,7 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
         const bL = dim.length * effectiveZoom;
 
         ctx.save();
-        ctx.translate(cScreen.x, cScreen.y);
+        ctx.translate(cScreen.x + shakeOffsetX, cScreen.y);
         ctx.rotate((cb.angle * Math.PI) / 180);
 
         ctx.shadowColor = 'rgba(0,0,0,0.3)';
@@ -1447,9 +1505,42 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
 
         ctx.shadowColor = 'transparent';
 
+        // Knit texture ribs
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.lineWidth = Math.max(0.75, 1 * engine.boardZoomScale);
+        const ribCount = Math.floor(bL / (8 * engine.boardZoomScale));
+        for (let r = 0; r < ribCount; r++) {
+          const lineY = by + (r + 0.5) * (bL / ribCount);
+          ctx.beginPath();
+          ctx.moveTo(bx + 3, lineY);
+          ctx.lineTo(bx + bW - 3, lineY);
+          ctx.stroke();
+        }
+
         const inActive = cb.x >= conv.activeZoneMinX && cb.x <= conv.activeZoneMaxX;
         ctx.strokeStyle = inActive ? '#ffffff' : 'rgba(255,255,255,0.4)';
         ctx.lineWidth = inActive ? Math.max(1.5, 2 * engine.boardZoomScale) : 1;
+        ctx.stroke();
+
+        // Forward Direction Arrow
+        const arrowLength = Math.min(bL * 0.45, 15 * engine.boardZoomScale);
+        const arrowWidth = Math.min(bW * 0.4, 10 * engine.boardZoomScale);
+        const arrowTipY = -bL / 2 + 5 * engine.boardZoomScale;
+
+        ctx.beginPath();
+        ctx.moveTo(0, arrowTipY);
+        ctx.lineTo(-arrowWidth / 2, arrowTipY + arrowLength * 0.6);
+        ctx.lineTo(-arrowWidth / 5, arrowTipY + arrowLength * 0.6);
+        ctx.lineTo(-arrowWidth / 5, arrowTipY + arrowLength);
+        ctx.lineTo(arrowWidth / 5, arrowTipY + arrowLength);
+        ctx.lineTo(arrowWidth / 5, arrowTipY + arrowLength * 0.6);
+        ctx.lineTo(arrowWidth / 2, arrowTipY + arrowLength * 0.6);
+        ctx.closePath();
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
+        ctx.lineWidth = Math.max(0.75, 1 * engine.boardZoomScale);
         ctx.stroke();
 
         const pW = Math.min(bW * 0.75, 24 * engine.boardZoomScale);
@@ -1676,11 +1767,14 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
     // Check exit status for all board boxes
     const exitStatus = new Map<number, ReturnType<typeof checkExitPath>>();
     engine.boardBoxes.forEach((b) => {
-      exitStatus.set(b.id, checkExitPath(b, engine.boardBoxes));
+      exitStatus.set(b.id, checkExitPath(b, getAllObstacles(b.id)));
     });
 
     // Render each board box
     engine.boardBoxes.forEach((b) => {
+      if (engine.iceAttacks.some((atk) => atk.attackerBox.id === b.id)) {
+        return;
+      }
       const status = exitStatus.get(b.id);
       const isClear = !status?.isBlocked;
       const isFrozen = isBoxFrozen(b);
@@ -1980,16 +2074,62 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
       }
     }
 
-    // Hover detection over board boxes (only in right half)
+    // Hover detection over boxes (conveyor boxes, tunnel ready boxes, board boxes)
     if (mouseX >= midX) {
       const { x: wx, z: wz } = screenToBoard(mouseX, mouseY, width, height);
-      const box = findBoardBoxAt(wx, wz, engineRef.current.boardBoxes);
-      if (box) {
-        const blocked = checkExitPath(box, engineRef.current.boardBoxes).isBlocked;
-        setHoveredBox({ id: box.id, isBlocked: blocked });
-      } else {
-        setHoveredBox(null);
+      let detected: { id: number; isBlocked: boolean } | null = null;
+
+      // 1. Conveyor boxes
+      for (const conv of engineRef.current.conveyors) {
+        if (Math.abs(wz - conv.z) <= 0.45) {
+          const cb = conv.boxes.find((box) => {
+            const dim = BOX_DIMENSIONS[box.numType] || BOX_DIMENSIONS.Box4;
+            return Math.abs(wx - box.x) <= dim.width / 2 && Math.abs(wz - conv.z) <= dim.length / 2;
+          });
+          if (cb) {
+            const minActive = Math.min(conv.activeZoneMinX, conv.activeZoneMaxX);
+            const maxActive = Math.max(conv.activeZoneMinX, conv.activeZoneMaxX);
+            const inActiveZone = cb.x >= minActive && cb.x <= maxActive;
+            if (!inActiveZone) {
+              detected = { id: cb.id, isBlocked: true };
+            } else {
+              const convBoxWithPos: BoxItem = { ...cb, x: cb.x, z: conv.z };
+              const obs = getAllObstacles(cb.id);
+              const exit = checkExitPath(convBoxWithPos, obs);
+              detected = { id: cb.id, isBlocked: exit.isBlocked };
+            }
+            break;
+          }
+        }
       }
+
+      // 2. Tunnel ready boxes
+      if (!detected) {
+        for (const tun of engineRef.current.tunnels) {
+          if (tun.queue.length === 0) continue;
+          if (isPointInTunnelCompound(wx, wz, tun)) {
+            const readyBox = getTunnelReadyBox(tun);
+            if (readyBox) {
+              const obs = getAllObstacles(readyBox.id);
+              const exit = checkExitPath(readyBox, obs);
+              detected = { id: readyBox.id, isBlocked: exit.isBlocked };
+            }
+            break;
+          }
+        }
+      }
+
+      // 3. Board boxes
+      if (!detected) {
+        const box = findBoardBoxAt(wx, wz, engineRef.current.boardBoxes);
+        if (box) {
+          const obs = getAllObstacles(box.id);
+          const blocked = checkExitPath(box, obs).isBlocked;
+          detected = { id: box.id, isBlocked: blocked };
+        }
+      }
+
+      setHoveredBox(detected);
     } else {
       setHoveredBox(null);
     }
@@ -2047,14 +2187,15 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
         const readyBox = getTunnelReadyBox(tun);
         if (!readyBox) continue;
 
-        const exitRes = checkExitPath(readyBox, engine.boardBoxes);
+        const obstacles = getAllObstacles(readyBox.id);
+        const exitRes = checkExitPath(readyBox, obstacles);
         const boxSc = boardToScreen(readyBox.x, readyBox.z, width, height);
         const dir = angleToDirection(readyBox.angle);
 
         if (exitRes.isBlocked) {
           // If blocked by a frozen bus, launch unfreezing attack!
           if (exitRes.blockingBoxId) {
-            const blocker = engine.boardBoxes.find((b) => b.id === exitRes.blockingBoxId);
+            const blocker = obstacles.find((b) => b.id === exitRes.blockingBoxId);
             if (blocker && isBoxFrozen(blocker)) {
               sounds.playWhoosh();
               engine.iceAttacks.push({
@@ -2159,7 +2300,54 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
             return;
           }
 
-          // Slot check
+          // Check Exit Path!
+          const convBoxWithPos: BoxItem = {
+            ...clickedConvBox,
+            x: clickedConvBox.x,
+            z: conv.z,
+          };
+          const obstacles = getAllObstacles(clickedConvBox.id);
+          const exitRes = checkExitPath(convBoxWithPos, obstacles);
+
+          if (exitRes.isBlocked) {
+            // Check if blocker is Frozen: if so, launch unfreezing attack!
+            if (exitRes.blockingBoxId) {
+              const blocker = obstacles.find((b) => b.id === exitRes.blockingBoxId);
+              if (blocker && isBoxFrozen(blocker)) {
+                sounds.playWhoosh();
+                engine.iceAttacks.push({
+                  id: Date.now(),
+                  attackerBox: convBoxWithPos,
+                  startX: convBoxWithPos.x,
+                  startZ: convBoxWithPos.z,
+                  currentX: convBoxWithPos.x,
+                  currentZ: convBoxWithPos.z,
+                  targetBoxId: blocker.id,
+                  dir: angleToDirection(convBoxWithPos.angle),
+                  distance: exitRes.distanceToBlocker || 1.0,
+                  progress: 0,
+                  state: 'forward',
+                });
+                return;
+              }
+            }
+
+            // Path blocked by another box: DO NOT MOVE OUT of the conveyor!
+            sounds.playBlocked();
+            engine.shakingBoxId = clickedConvBox.id;
+            engine.shakeTimer = 0.4;
+            engine.feedbacks.push({
+              id: Date.now(),
+              text: 'Path Blocked! ❌',
+              x: boxSc.x,
+              y: boxSc.y - 20,
+              color: '#ef4444',
+              lifetime: 1.0,
+            });
+            return;
+          }
+
+          // Path is clear! Check slot availability
           const emptySlotIdx = engine.slottedBoxes.findIndex((s) => s === null);
           if (emptySlotIdx === -1) {
             sounds.playBlocked();
@@ -2176,10 +2364,10 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
             return;
           }
 
-          // Launch conveyor box into slot
+          // Path is clear & slot is available: Launch conveyor box into slot!
           sounds.playWhoosh();
           engine.slottedBoxes[emptySlotIdx] = {
-            box: clickedConvBox,
+            box: convBoxWithPos,
             filled: 0,
             capacity: clickedConvBox.capacity,
             color: clickedConvBox.color,
@@ -2218,12 +2406,13 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
     }
 
     // Check exit path
-    const exitRes = checkExitPath(clickedBox, engine.boardBoxes);
+    const obstacles = getAllObstacles(clickedBox.id);
+    const exitRes = checkExitPath(clickedBox, obstacles);
 
     if (exitRes.isBlocked) {
       // Check if blocker is Frozen: if so, LAUNCH UNFREEZING ATTACK!
       if (exitRes.blockingBoxId) {
-        const blocker = engine.boardBoxes.find((b) => b.id === exitRes.blockingBoxId);
+        const blocker = obstacles.find((b) => b.id === exitRes.blockingBoxId);
         if (blocker && isBoxFrozen(blocker)) {
           sounds.playWhoosh();
           engine.iceAttacks.push({

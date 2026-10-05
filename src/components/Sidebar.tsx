@@ -43,7 +43,7 @@ interface SidebarProps {
   setGridSnap: (snap: number) => void;
   showRays: boolean;
   setShowRays: (show: boolean) => void;
-  onAddBox: (numType: BoxNumType, color: number, boxType?: BoxType) => void;
+  onAddBox: (numType: BoxNumType, color: number, boxType?: BoxType, angle?: number) => void;
   onClearBoard?: () => void;
   onRandomizeLayout?: () => void;
   // Tunnel props
@@ -106,15 +106,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const currentBoxType = setActiveBoxType ? activeBoxType : localActiveBoxType;
   const updateActiveBoxType = setActiveBoxType || setLocalActiveBoxType;
 
+  // Active angle for new boxes and rotation tracking
+  const [activeAngle, setActiveAngle] = useState<number>(0);
+
   // Queue adder states for Tunnel and Conveyor
   const [tunnelAddNumType, setTunnelAddNumType] = useState<BoxNumType>('Box6');
   const [tunnelAddColor, setTunnelAddColor] = useState<number>(2);
 
   const [conveyorAddNumType, setConveyorAddNumType] = useState<BoxNumType>('Box6');
   const [conveyorAddColor, setConveyorAddColor] = useState<number>(3);
+  const [conveyorAddAngle, setConveyorAddAngle] = useState<number>(0);
 
   const selectedBoxes = boxes.filter((b) => selectedBoxIds.includes(b.id));
   const singleSelected = selectedBoxes.length === 1 ? selectedBoxes[0] : null;
+
+  // Current angle to display: from single selection, first of multi-selection, or activeAngle
+  const currentAngle = singleSelected
+    ? singleSelected.angle
+    : selectedBoxes.length > 0
+    ? selectedBoxes[0].angle
+    : activeAngle;
 
   // Selected Tunnel & Conveyor
   const selectedTunnel = tunnels.find((t) => t.id === selectedTunnelId) || null;
@@ -123,11 +134,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // Single box exit status
   const singleExitStatus = singleSelected ? checkExitPath(singleSelected, boxes) : null;
 
-  // Set angle for all selected boxes
+  // Set angle for all selected boxes (or activeAngle if none selected)
   const setAngle = (angle: number) => {
     sounds.playPop();
-    const updated = boxes.map((b) => (selectedBoxIds.includes(b.id) ? { ...b, angle } : b));
-    onUpdateBoxes(updated);
+    const normalized = Math.round((((angle % 360) + 360) % 360) * 10) / 10;
+    setActiveAngle(normalized);
+    if (selectedBoxIds.length > 0) {
+      const updated = boxes.map((b) => (selectedBoxIds.includes(b.id) ? { ...b, angle: normalized } : b));
+      onUpdateBoxes(updated);
+    }
   };
 
   // Set color for selected boxes
@@ -356,7 +371,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             return (
               <button
                 key={nt}
-                onClick={() => onAddBox(nt, activeColor, currentBoxType)}
+                onClick={() => onAddBox(nt, activeColor, currentBoxType, activeAngle)}
                 className={`flex flex-col items-center justify-center p-2 rounded-xl bg-slate-800/70 hover:bg-slate-750 border transition group active:scale-95 ${
                   currentBoxType === 'Ice'
                     ? 'border-sky-500/50 hover:border-sky-400'
@@ -416,44 +431,115 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
 
-      {/* 3. Exit Direction (Angle) */}
-      <div className="p-3 border-b border-slate-800/80 space-y-2">
-        <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
-          Arrow Direction
-        </label>
-        <div className="grid grid-cols-4 gap-1.5">
-          <button
-            onClick={() => setAngle(0)}
-            className="flex flex-col items-center p-2 rounded-lg bg-slate-800/70 hover:bg-slate-700 text-xs text-slate-300 hover:text-white transition"
-            title="Up (0°)"
-          >
-            <ArrowUp className="w-4 h-4 mb-0.5" />
-            <span className="text-[10px]">Up</span>
-          </button>
-          <button
-            onClick={() => setAngle(90)}
-            className="flex flex-col items-center p-2 rounded-lg bg-slate-800/70 hover:bg-slate-700 text-xs text-slate-300 hover:text-white transition"
-            title="Right (90°)"
-          >
-            <ArrowRight className="w-4 h-4 mb-0.5" />
-            <span className="text-[10px]">Right</span>
-          </button>
-          <button
-            onClick={() => setAngle(180)}
-            className="flex flex-col items-center p-2 rounded-lg bg-slate-800/70 hover:bg-slate-700 text-xs text-slate-300 hover:text-white transition"
-            title="Down (180°)"
-          >
-            <ArrowDown className="w-4 h-4 mb-0.5" />
-            <span className="text-[10px]">Down</span>
-          </button>
-          <button
-            onClick={() => setAngle(270)}
-            className="flex flex-col items-center p-2 rounded-lg bg-slate-800/70 hover:bg-slate-700 text-xs text-slate-300 hover:text-white transition"
-            title="Left (270°)"
-          >
-            <ArrowLeft className="w-4 h-4 mb-0.5" />
-            <span className="text-[10px]">Left</span>
-          </button>
+      {/* 3. Exit Direction & Rotation Angle */}
+      <div className="p-3 border-b border-slate-800/80 space-y-2.5">
+        <div className="flex items-center justify-between">
+          <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
+            Box Rotation
+          </label>
+          <span className="text-xs font-mono font-bold text-cyan-400 bg-slate-950 border border-slate-800 px-2 py-0.5 rounded">
+            {currentAngle}°
+          </span>
+        </div>
+
+        {/* Numerical input + step buttons */}
+        <div className="flex items-center gap-1.5">
+          <div className="relative flex-1">
+            <input
+              type="number"
+              step="1"
+              min="0"
+              max="360"
+              value={currentAngle}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                const normalized = isNaN(val) ? 0 : Math.round((((val % 360) + 360) % 360) * 10) / 10;
+                setAngle(normalized);
+              }}
+              className="w-full bg-slate-950 border border-slate-700 focus:border-cyan-500 rounded px-2.5 py-1.5 font-mono text-cyan-300 font-semibold text-xs pr-6"
+              placeholder="0 - 360°"
+            />
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 text-xs font-mono pointer-events-none">
+              °
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => {
+                const next = Math.round((((currentAngle - 15) % 360 + 360) % 360) * 10) / 10;
+                setAngle(next);
+              }}
+              className="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white rounded text-[11px] font-mono transition"
+              title="Rotate -15° counter-clockwise"
+            >
+              -15°
+            </button>
+            <button
+              onClick={() => {
+                const next = Math.round(((currentAngle + 15) % 360) * 10) / 10;
+                setAngle(next);
+              }}
+              className="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white rounded text-[11px] font-mono transition"
+              title="Rotate +15° clockwise"
+            >
+              +15°
+            </button>
+            <button
+              onClick={() => {
+                const next = Math.round(((currentAngle + 45) % 360) * 10) / 10;
+                setAngle(next);
+              }}
+              className="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white rounded text-[11px] font-mono transition"
+              title="Rotate +45°"
+            >
+              +45°
+            </button>
+          </div>
+        </div>
+
+        {/* Rotation Slider */}
+        <div className="flex items-center gap-2 pt-0.5">
+          <input
+            type="range"
+            min="0"
+            max="360"
+            step="1"
+            value={currentAngle}
+            onChange={(e) => {
+              const val = parseFloat(e.target.value) || 0;
+              setAngle(val);
+            }}
+            className="w-full accent-cyan-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+            title={`Drag to rotate (${currentAngle}°)`}
+          />
+        </div>
+
+        {/* 4 Cardinal Angle Presets */}
+        <div className="grid grid-cols-4 gap-1.5 pt-0.5">
+          {[
+            { deg: 0, label: '0° ⬆', icon: ArrowUp },
+            { deg: 90, label: '90° ➡', icon: ArrowRight },
+            { deg: 180, label: '180° ⬇', icon: ArrowDown },
+            { deg: 270, label: '270° ⬅', icon: ArrowLeft },
+          ].map(({ deg, label, icon: Icon }) => {
+            const isMatch = Math.round(currentAngle) === deg;
+            return (
+              <button
+                key={deg}
+                onClick={() => setAngle(deg)}
+                className={`flex flex-col items-center p-1.5 rounded-lg text-xs transition border ${
+                  isMatch
+                    ? 'bg-cyan-600/30 text-cyan-300 border-cyan-500 font-bold shadow'
+                    : 'bg-slate-800/70 hover:bg-slate-700 text-slate-300 hover:text-white border-transparent'
+                }`}
+                title={`Set to ${deg}°`}
+              >
+                <Icon className="w-3.5 h-3.5 mb-0.5" />
+                <span className="text-[10px] font-mono">{label}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -888,25 +974,43 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       </span>
                     </div>
 
-                    <button
-                      onClick={() => {
-                        sounds.playPop();
-                        const remaining = selectedConveyor.boxes.filter((_, i) => i !== idx);
-                        const updated = evenlySpreadConveyorBoxes(
-                          remaining,
-                          selectedConveyor.startX,
-                          selectedConveyor.endX
-                        );
-                        onUpdateConveyors?.(
-                          conveyors.map((c) =>
-                            c.id === selectedConveyor.id ? { ...c, boxes: updated } : c
-                          )
-                        );
-                      }}
-                      className="p-1 text-slate-500 hover:text-rose-400"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => {
+                          sounds.playPop();
+                          const q = selectedConveyor.boxes.map((item, i) =>
+                            i === idx ? { ...item, angle: ((item.angle || 0) + 90) % 360 } : item
+                          );
+                          onUpdateConveyors?.(
+                            conveyors.map((c) => (c.id === selectedConveyor.id ? { ...c, boxes: q } : c))
+                          );
+                        }}
+                        className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-mono text-cyan-400 border border-slate-700"
+                        title="Click to rotate 90°"
+                      >
+                        {b.angle || 0}°
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          sounds.playPop();
+                          const remaining = selectedConveyor.boxes.filter((_, i) => i !== idx);
+                          const updated = evenlySpreadConveyorBoxes(
+                            remaining,
+                            selectedConveyor.startX,
+                            selectedConveyor.endX
+                          );
+                          onUpdateConveyors?.(
+                            conveyors.map((c) =>
+                              c.id === selectedConveyor.id ? { ...c, boxes: updated } : c
+                            )
+                          );
+                        }}
+                        className="p-1 text-slate-500 hover:text-rose-400"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
                   </div>
                 );
               })}
@@ -957,6 +1061,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   ))}
                 </div>
 
+                <div className="flex items-center gap-1">
+                  {[0, 180, 90, 270].map((deg) => (
+                    <button
+                      key={deg}
+                      onClick={() => setConveyorAddAngle(deg)}
+                      className={`px-1.5 py-0.5 rounded text-[10px] font-mono border ${
+                        conveyorAddAngle === deg
+                          ? 'bg-cyan-600 text-white border-cyan-400 font-bold'
+                          : 'bg-slate-800 text-slate-400 border-slate-700'
+                      }`}
+                      title={`Direction ${deg}°`}
+                    >
+                      {deg}°
+                    </button>
+                  ))}
+                </div>
+
                 <button
                   onClick={() => {
                     sounds.playPop();
@@ -966,7 +1087,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       id: newId,
                       x: 0,
                       z: selectedConveyor.z,
-                      angle: 0,
+                      angle: conveyorAddAngle,
                       numType: conveyorAddNumType,
                       capacity: cap,
                       color: conveyorAddColor,
@@ -1071,8 +1192,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           </div>
 
-          {/* Position Inputs */}
-          <div className="grid grid-cols-2 gap-2 text-xs">
+          {/* Position & Rotation Inputs */}
+          <div className="grid grid-cols-3 gap-2 text-xs">
             <div>
               <label className="text-slate-400 text-[10px] block mb-0.5">X Position</label>
               <input
@@ -1102,6 +1223,56 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 }}
                 className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 font-mono text-white text-xs"
               />
+            </div>
+            <div>
+              <label className="text-slate-400 text-[10px] block mb-0.5">Rotation (°)</label>
+              <input
+                type="number"
+                step="1"
+                min="0"
+                max="360"
+                value={singleSelected.angle}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  const normalized = isNaN(val) ? 0 : Math.round((((val % 360) + 360) % 360) * 10) / 10;
+                  setAngle(normalized);
+                }}
+                className="w-full bg-slate-950 border border-slate-700 focus:border-cyan-500 rounded px-2 py-1 font-mono text-cyan-300 font-semibold text-xs"
+              />
+            </div>
+          </div>
+
+          {/* Quick Rotation Shortcuts */}
+          <div className="flex items-center justify-between gap-1">
+            <span className="text-[10px] text-slate-400 font-medium">Rotate:</span>
+            <div className="flex items-center gap-1">
+              {[0, 90, 180, 270].map((deg) => (
+                <button
+                  key={deg}
+                  onClick={() => setAngle(deg)}
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-mono border transition ${
+                    Math.round(singleSelected.angle) === deg
+                      ? 'bg-cyan-600 text-white border-cyan-400 font-bold'
+                      : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
+                  }`}
+                >
+                  {deg}°
+                </button>
+              ))}
+              <button
+                onClick={() => setAngle(Math.round((((singleSelected.angle - 15) % 360 + 360) % 360) * 10) / 10)}
+                className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white"
+                title="-15°"
+              >
+                -15°
+              </button>
+              <button
+                onClick={() => setAngle(Math.round(((singleSelected.angle + 15) % 360) * 10) / 10)}
+                className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white"
+                title="+15°"
+              >
+                +15°
+              </button>
             </div>
           </div>
 
@@ -1184,6 +1355,35 @@ export const Sidebar: React.FC<SidebarProps> = ({
               >
                 <ArrowDownToLine className="w-4 h-4" />
               </button>
+            </div>
+          </div>
+
+          {/* Batch Rotation */}
+          <div>
+            <label className="text-slate-400 text-[10px] block mb-1">Set Rotation</label>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <input
+                type="number"
+                placeholder="Angle (0-360°)"
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  if (!isNaN(val)) {
+                    setAngle(val);
+                  }
+                }}
+                className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200 text-xs font-mono focus:border-cyan-500 focus:outline-none"
+              />
+            </div>
+            <div className="grid grid-cols-4 gap-1">
+              {[0, 90, 180, 270].map((a) => (
+                <button
+                  key={a}
+                  onClick={() => setAngle(a)}
+                  className="py-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-mono text-slate-300 hover:text-white"
+                >
+                  {a}°
+                </button>
+              ))}
             </div>
           </div>
 

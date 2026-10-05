@@ -78,7 +78,7 @@ function App() {
   }, [historyIdx, history]);
 
   // Add Box tool
-  const handleAddBox = (numType: BoxNumType, color: number, boxType: BoxType = 'Normal') => {
+  const handleAddBox = (numType: BoxNumType, color: number, boxType: BoxType = 'Normal', angle: number = 0) => {
     sounds.playPop();
     const maxId = levelData.boxes.reduce((max, b) => Math.max(max, b.id), 0);
     const capacity = BOX_DIMENSIONS[numType].capacity;
@@ -87,7 +87,7 @@ function App() {
       id: maxId + 1,
       x: 0,
       z: -2.0,
-      angle: 0,
+      angle,
       numType,
       capacity,
       color,

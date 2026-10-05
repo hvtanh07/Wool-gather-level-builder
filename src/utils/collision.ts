@@ -154,25 +154,59 @@ export function checkExitPath(
   for (const target of allBoxes) {
     if (target.id === sourceBox.id) continue;
 
-    // Fast distance culling: if target is behind source or far away
+    // Fast distance culling: target must be in front and closer than current minimum hit distance
     const dx = target.x - sourceBox.x;
     const dz = target.z - sourceBox.z;
     const dotForward = dx * src.direction.x + dz * src.direction.z;
-    // If target is behind source box center or too far
-    if (dotForward < 0.01) continue;
+    if (dotForward < 0.01 || dotForward > minHitDist + 0.6) continue;
 
-    // Check rays from source front edge
-    for (const offset of rayOffsets) {
-      const rayOrigin: Point2D = {
-        x: frontCenter.x + src.right.x * offset,
-        z: frontCenter.z + src.right.z * offset,
-      };
+    // Fast lateral corridor culling: target must be within corridor width + target radius
+    const dotSide = Math.abs(dx * src.right.x + dz * src.right.z);
+    if (dotSide > hw + 0.55) continue;
 
-      const result = raycastBox(rayOrigin, src.direction, maxDistance, target);
-      if (result.hit && result.distance < minHitDist) {
-        minHitDist = result.distance;
-        blockingBox = target;
-        hitPoint = result.point;
+    // Precalculate target segments once for all 5 rays
+    const targetCorners = getBoxCorners(target);
+    const p1 = targetCorners.frontLeft;
+    const p2 = targetCorners.frontRight;
+    const p3 = targetCorners.backRight;
+    const p4 = targetCorners.backLeft;
+    const segs = [
+      [p1.x, p1.z, p2.x, p2.z],
+      [p2.x, p2.z, p3.x, p3.z],
+      [p3.x, p3.z, p4.x, p4.z],
+      [p4.x, p4.z, p1.x, p1.z],
+    ];
+
+    const curMax = Math.min(maxDistance, minHitDist);
+
+    // Check 5 rays across source front edge
+    for (let r = 0; r < 5; r++) {
+      const offset = rayOffsets[r];
+      const rOx = frontCenter.x + src.right.x * offset;
+      const rOz = frontCenter.z + src.right.z * offset;
+      const rEx = rOx + src.direction.x * curMax;
+      const rEz = rOz + src.direction.z * curMax;
+
+      for (let s = 0; s < 4; s++) {
+        const seg = segs[s];
+        const x3 = seg[0], z3 = seg[1], x4 = seg[2], z4 = seg[3];
+        const denom = (z4 - z3) * (rEx - rOx) - (x4 - x3) * (rEz - rOz);
+        if (denom === 0) continue;
+
+        const ua = ((x4 - x3) * (rOz - z3) - (z4 - z3) * (rOx - x3)) / denom;
+        const ub = ((rEx - rOx) * (rOz - z3) - (rEz - rOz) * (rOx - x3)) / denom;
+
+        if (ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1) {
+          const dist = ua * curMax;
+          if (dist < minHitDist) {
+            minHitDist = dist;
+            blockingBox = target;
+            hitPoint = {
+              x: rOx + ua * (rEx - rOx),
+              z: rOz + ua * (rEz - rOz),
+            };
+          }
+        }
       }
     }
   }

@@ -1,10 +1,10 @@
-import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo, useDeferredValue } from 'react';
 import { BoxItem, BoxNumType, DragonSetup, TunnelSetup, ConveyorSetup, isBoxFrozen } from '../types/level';
 import { BOX_DIMENSIONS, getWoolColor, getBoxNumType, ICE_THEME, TUNNEL_THEME, CONVEYOR_THEME } from '../utils/colors';
 import { checkExitPath, getBoxCorners, angleToDirection, getTunnelReadyBox, isPointInTunnelCompound } from '../utils/collision';
 import { solveBoxLayout } from '../utils/dragonSolver';
 import { sounds } from '../utils/audio';
-import { CheckCircle2, AlertTriangle, ListOrdered, ShieldAlert, HelpCircle, Eye, EyeOff, Maximize2 } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, ListOrdered, ShieldAlert, HelpCircle, Maximize2 } from 'lucide-react';
 
 interface CanvasEditorProps {
   boxes: BoxItem[];
@@ -102,15 +102,18 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
   // Help cheat sheet visibility
   const [showHelp, setShowHelp] = useState<boolean>(false);
 
-  // Show Dragon Track toggle
-  const [showDragonTrack, setShowDragonTrack] = useState<boolean>(true);
+  // RAF throttling refs for high-frequency mouse drag events
+  const dragRafIdRef = useRef<number | null>(null);
+  const pendingDragPosRef = useRef<{ mouseX: number; mouseY: number } | null>(null);
 
-  // Real-time Solvability Check on every change
+  // Real-time Solvability Check (deferred during rapid drag for 60+ FPS smoothness)
   const [showSolutionOrder, setShowSolutionOrder] = useState<boolean>(false);
 
+  const deferredBoxes = useDeferredValue(boxes);
+
   const solveResult = useMemo(() => {
-    return solveBoxLayout(boxes);
-  }, [boxes]);
+    return solveBoxLayout(deferredBoxes);
+  }, [deferredBoxes]);
 
   const deadlockedIds = useMemo(() => {
     return new Set(solveResult.unsolvableRemaining?.map((b) => b.id) || []);
@@ -124,39 +127,23 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
     return map;
   }, [solveResult]);
 
-  // Spline interpolation for track in World (x, z) coordinates
-  const getTrackPointAt = useCallback(
-    (progress: number): { x: number; z: number; angle: number } => {
-      const track = dragon?.track;
-      if (!track || track.length < 2) return { x: 0, z: 5, angle: 0 };
-
-      const clampedP = Math.max(0, Math.min(progress, 0.9999));
-      const totalSegments = track.length - 1;
-      const segIndex = Math.min(Math.floor(clampedP * totalSegments), totalSegments - 1);
-      const segT = clampedP * totalSegments - segIndex;
-
-      const p0 = track[segIndex];
-      const p1 = track[segIndex + 1];
-
-      const x = p0.x + (p1.x - p0.x) * segT;
-      const z = p0.y + (p1.y - p0.y) * segT; // track[i].y is World Z
-      const dx = p1.x - p0.x;
-      const dz = p1.y - p0.y;
-      const angle = Math.atan2(dz, dx);
-
-      return { x, z, angle };
-    },
-    [dragon?.track]
-  );
-
-  // Center pan initially to show both the dragon track and the board boxes
+  // Center camera initially on the board boxes area
   useEffect(() => {
     if (canvasRef.current) {
       const w = canvasRef.current.clientWidth;
       const h = canvasRef.current.clientHeight;
-      setPan({ x: w / 2, y: h * 0.52 });
-      setZoom(52);
+      setPan({ x: w / 2, y: h / 2 - 150 });
+      setZoom(60);
     }
+  }, []);
+
+  // Cleanup drag RAF on unmount
+  useEffect(() => {
+    return () => {
+      if (dragRafIdRef.current !== null) {
+        cancelAnimationFrame(dragRafIdRef.current);
+      }
+    };
   }, []);
 
   // Convert World (x, z) to Screen (px, py)
@@ -320,173 +307,6 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
 
 
     // -------------------------------------------------------------
-    // Dragon Track, Fog Area & Starting Line Preview in Scene
-    // -------------------------------------------------------------
-    if (showDragonTrack && dragon?.track && dragon.track.length > 1) {
-      ctx.save();
-
-      // 1. Road Track
-      ctx.beginPath();
-      const first = worldToScreen(dragon.track[0].x, dragon.track[0].y);
-      ctx.moveTo(first.x, first.y);
-      for (let i = 1; i < dragon.track.length; i++) {
-        const pt = worldToScreen(dragon.track[i].x, dragon.track[i].y);
-        ctx.lineTo(pt.x, pt.y);
-      }
-
-      ctx.lineWidth = 26;
-      ctx.strokeStyle = 'rgba(51, 65, 85, 0.55)';
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.stroke();
-
-      ctx.lineWidth = 18;
-      ctx.strokeStyle = 'rgba(71, 85, 105, 0.75)';
-      ctx.stroke();
-
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
-      ctx.setLineDash([8, 8]);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      // 2. Fog Area Ribbon (0.0 to 1/3)
-      const FOG_BOUNDARY = 1 / 3;
-      const START_POINT = 1 / 3;
-
-      ctx.beginPath();
-      const fogSteps = 24;
-      for (let i = 0; i <= fogSteps; i++) {
-        const p = (i / fogSteps) * FOG_BOUNDARY;
-        const pt = getTrackPointAt(p);
-        const scr = worldToScreen(pt.x, pt.z);
-        if (i === 0) ctx.moveTo(scr.x, scr.y);
-        else ctx.lineTo(scr.x, scr.y);
-      }
-      ctx.lineWidth = 26;
-      ctx.strokeStyle = 'rgba(148, 163, 184, 0.4)';
-      ctx.lineCap = 'round';
-      ctx.stroke();
-
-      // Fog Region Badge
-      const fogMidPt = getTrackPointAt(0.15);
-      const fogMidScr = worldToScreen(fogMidPt.x, fogMidPt.z);
-      ctx.fillStyle = 'rgba(30, 41, 59, 0.88)';
-      ctx.beginPath();
-      ctx.roundRect(fogMidScr.x - 38, fogMidScr.y - 18, 76, 16, 4);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(148, 163, 184, 0.4)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      ctx.fillStyle = '#cbd5e1';
-      ctx.font = 'bold 8.5px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('🌫️ FOG (0-33%)', fogMidScr.x, fogMidScr.y - 10);
-
-      // 3. Start Point Gate Line & Badge (P = 1/3)
-      const startPt = getTrackPointAt(START_POINT);
-      const startScr = worldToScreen(startPt.x, startPt.z);
-      const perpAngle = -startPt.angle + Math.PI / 2;
-      const gateW = 15;
-      ctx.beginPath();
-      ctx.moveTo(startScr.x + Math.cos(perpAngle) * gateW, startScr.y + Math.sin(perpAngle) * gateW);
-      ctx.lineTo(startScr.x - Math.cos(perpAngle) * gateW, startScr.y - Math.sin(perpAngle) * gateW);
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = '#06b6d4';
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.moveTo(startScr.x + Math.cos(perpAngle) * gateW, startScr.y + Math.sin(perpAngle) * gateW);
-      ctx.lineTo(startScr.x - Math.cos(perpAngle) * gateW, startScr.y - Math.sin(perpAngle) * gateW);
-      ctx.lineWidth = 1.5;
-      ctx.strokeStyle = '#ffffff';
-      ctx.setLineDash([3, 3]);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      // Start Badge
-      const bX = startScr.x + Math.cos(perpAngle) * 24;
-      const bY = startScr.y + Math.sin(perpAngle) * 24;
-      ctx.fillStyle = '#0f172a';
-      ctx.beginPath();
-      ctx.roundRect(bX - 22, bY - 8, 44, 16, 4);
-      ctx.fill();
-      ctx.strokeStyle = '#06b6d4';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-      ctx.fillStyle = '#38bdf8';
-      ctx.font = 'bold 8.5px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('🚩 START', bX, bY);
-
-      // 4. Cat Checkpoints
-      if (dragon.catPositions) {
-        dragon.catPositions.forEach((cat, idx) => {
-          const catPt = getTrackPointAt(cat.progress);
-          const catScr = worldToScreen(catPt.x, catPt.z);
-
-          ctx.beginPath();
-          ctx.arc(catScr.x, catScr.y, 8, 0, Math.PI * 2);
-          ctx.fillStyle = '#f59e0b';
-          ctx.fill();
-          ctx.strokeStyle = '#b45309';
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
-
-          ctx.fillStyle = '#fef3c7';
-          ctx.font = 'bold 8.5px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(`🐱 CP${idx + 1}`, catScr.x, catScr.y - 12);
-        });
-      }
-
-      // 5. Dragon Wool Body & Head Preview
-      let dragProg = START_POINT;
-      const segStep = 0.007;
-      if (dragon.sections) {
-        for (const sec of dragon.sections) {
-          const col = getWoolColor(sec.color);
-          const knotCount = Math.min(sec.count, 20);
-          for (let k = 0; k < knotCount; k++) {
-            dragProg -= segStep;
-            if (dragProg < 0) break;
-            const kPt = getTrackPointAt(dragProg);
-            const kScr = worldToScreen(kPt.x, kPt.z);
-            const inFog = dragProg < FOG_BOUNDARY;
-            ctx.globalAlpha = inFog ? 0.35 : 0.9;
-            ctx.beginPath();
-            ctx.arc(kScr.x, kScr.y, 6, 0, Math.PI * 2);
-            ctx.fillStyle = col.hex;
-            ctx.fill();
-            ctx.strokeStyle = inFog ? 'rgba(255,255,255,0.4)' : col.darkHex;
-            ctx.lineWidth = 1;
-            ctx.stroke();
-          }
-          if (dragProg < 0) break;
-        }
-        ctx.globalAlpha = 1.0;
-      }
-
-      // Dragon Head Preview
-      ctx.save();
-      ctx.translate(startScr.x, startScr.y);
-      ctx.rotate(-startPt.angle);
-      ctx.beginPath();
-      ctx.arc(3, 0, 10, 0, Math.PI * 2);
-      ctx.fillStyle = '#f97316';
-      ctx.fill();
-      ctx.strokeStyle = '#c2410c';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-      ctx.restore();
-
-      ctx.restore();
-    }
-
-    // -------------------------------------------------------------
     // DRAW CONVEYORS
     // -------------------------------------------------------------
     conveyors.forEach((conv) => {
@@ -632,6 +452,27 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
         const inActive = cb.x >= conv.activeZoneMinX && cb.x <= conv.activeZoneMaxX;
         ctx.strokeStyle = inActive ? '#ffffff' : 'rgba(255,255,255,0.4)';
         ctx.lineWidth = inActive ? 1.5 : 1;
+        ctx.stroke();
+
+        // Forward direction arrow
+        const arrowLength = Math.min(bL * 0.45, 16);
+        const arrowWidth = Math.min(bW * 0.4, 11);
+        const arrowTipY = -bL / 2 + 5;
+
+        ctx.beginPath();
+        ctx.moveTo(0, arrowTipY);
+        ctx.lineTo(-arrowWidth / 2, arrowTipY + arrowLength * 0.6);
+        ctx.lineTo(-arrowWidth / 5, arrowTipY + arrowLength * 0.6);
+        ctx.lineTo(-arrowWidth / 5, arrowTipY + arrowLength);
+        ctx.lineTo(arrowWidth / 5, arrowTipY + arrowLength);
+        ctx.lineTo(arrowWidth / 5, arrowTipY + arrowLength * 0.6);
+        ctx.lineTo(arrowWidth / 2, arrowTipY + arrowLength * 0.6);
+        ctx.closePath();
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+        ctx.lineWidth = 1;
         ctx.stroke();
 
         const pW = Math.min(bW * 0.75, 24);
@@ -945,9 +786,9 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
       ctx.fillText(`${b.capacity}`, 0, pillY + pillH / 2);
 
       // Box ID small text
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
       ctx.font = '9px monospace';
-      ctx.fillText(`#${b.id}`, 0, 0);
+      ctx.fillText(isSelected ? `#${b.id} (${Math.round(b.angle)}°)` : `#${b.id}`, 0, 0);
 
       // Snowflake badge in corner for Frozen Box
       if (isFrozen) {
@@ -1434,28 +1275,36 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
     }
 
     if (isDraggingBox) {
-      const dxScreen = mouseX - dragStartPos.mouseX;
-      const dyScreen = mouseY - dragStartPos.mouseY;
+      pendingDragPosRef.current = { mouseX, mouseY };
+      if (dragRafIdRef.current === null) {
+        dragRafIdRef.current = requestAnimationFrame(() => {
+          dragRafIdRef.current = null;
+          if (!pendingDragPosRef.current) return;
+          const { mouseX: curMX, mouseY: curMY } = pendingDragPosRef.current;
+          const dxScreen = curMX - dragStartPos.mouseX;
+          const dyScreen = curMY - dragStartPos.mouseY;
 
-      if (Math.hypot(dxScreen, dyScreen) > 3) {
-        hasDraggedRef.current = true;
+          if (Math.hypot(dxScreen, dyScreen) > 3) {
+            hasDraggedRef.current = true;
+          }
+
+          const dxWorld = dxScreen / zoom;
+          const dzWorld = -dyScreen / zoom;
+
+          const updated = boxes.map((b) => {
+            const initPos = dragStartPos.boxPositions.get(b.id);
+            if (!initPos) return b;
+            return {
+              ...b,
+              x: snapVal(initPos.x + dxWorld),
+              z: snapVal(initPos.z + dzWorld),
+            };
+          });
+
+          // Update live positions smoothly without recording history snapshot on every pixel!
+          onUpdateBoxes(updated, false);
+        });
       }
-
-      const dxWorld = dxScreen / zoom;
-      const dzWorld = -dyScreen / zoom;
-
-      const updated = boxes.map((b) => {
-        const initPos = dragStartPos.boxPositions.get(b.id);
-        if (!initPos) return b;
-        return {
-          ...b,
-          x: snapVal(initPos.x + dxWorld),
-          z: snapVal(initPos.z + dzWorld),
-        };
-      });
-
-      // Update live positions smoothly without recording history snapshot on every pixel!
-      onUpdateBoxes(updated, false);
       return;
     }
 
@@ -1494,6 +1343,10 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
 
     if (isDraggingBox) {
       setIsDraggingBox(false);
+      if (dragRafIdRef.current !== null) {
+        cancelAnimationFrame(dragRafIdRef.current);
+        dragRafIdRef.current = null;
+      }
       // If box actually moved, commit once to undo history
       if (hasDraggedRef.current) {
         onUpdateBoxes(latestBoxesRef.current, true);
@@ -1550,11 +1403,12 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
 
       if (selectedBoxIds.length === 0) return;
 
-      // R: Rotate 90 deg clockwise (Shift+R for counter-clockwise)
+      // R: Rotate 90 deg clockwise (Shift+R for CCW, Alt+R for fine 15 deg steps)
       if (e.key === 'r' || e.key === 'R') {
         e.preventDefault();
         sounds.playPop();
-        const delta = e.shiftKey ? -90 : 90;
+        const step = e.altKey ? 15 : 90;
+        const delta = e.shiftKey ? -step : step;
         const updated = boxes.map((b) => {
           if (!selectedBoxIds.includes(b.id)) return b;
           let nextAngle = (b.angle + delta) % 360;
@@ -1696,44 +1550,20 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
         <button
           onClick={() => {
             if (canvasRef.current) {
-              setPan({ x: canvasRef.current.clientWidth / 2, y: canvasRef.current.clientHeight * 0.52 });
-              setZoom(52);
+              const w = canvasRef.current.clientWidth;
+              const h = canvasRef.current.clientHeight;
+              setPan({ x: w / 2, y: h / 2 - 150 });
+              setZoom(60);
             }
           }}
-          className="hover:text-white px-1.5 py-0.5 rounded hover:bg-slate-800 transition flex items-center gap-1"
-          title="Fit All (Show Dragon Track and Board)"
+          className="hover:text-white px-1.5 py-0.5 rounded hover:bg-slate-800 transition flex items-center gap-1 text-slate-300"
+          title="Center Camera on Box Board"
         >
           <Maximize2 className="w-3.5 h-3.5 text-cyan-400" />
-          <span>Fit Scene</span>
+          <span>Center Board</span>
         </button>
         <span className="text-slate-600">|</span>
-        <button
-          onClick={() => setShowDragonTrack(!showDragonTrack)}
-          className={`px-1.5 py-0.5 rounded transition flex items-center gap-1 font-medium ${
-            showDragonTrack
-              ? 'text-cyan-400 bg-cyan-950/60 border border-cyan-800/40'
-              : 'text-slate-500 hover:text-slate-300'
-          }`}
-          title="Toggle Dragon Track visibility in editor canvas"
-        >
-          {showDragonTrack ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-          <span>Dragon Track</span>
-        </button>
-        <span className="text-slate-600">|</span>
-        <button
-          onClick={() => {
-            if (canvasRef.current) {
-              setPan({ x: canvasRef.current.clientWidth / 2, y: canvasRef.current.clientHeight / 2 + 100 });
-              setZoom(65);
-            }
-          }}
-          className="hover:text-white px-1 py-0.5 rounded hover:bg-slate-800 transition"
-          title="Center on Box Board"
-        >
-          Focus Boxes
-        </button>
-        <span className="text-slate-600">|</span>
-        <span>Zoom: {Math.round((zoom / 52) * 100)}%</span>
+        <span>Zoom: {Math.round((zoom / 60) * 100)}%</span>
       </div>
 
       {/* Real-time Solvability & Exit Order Panel - Bottom Right (Requested placement) */}

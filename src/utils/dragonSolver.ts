@@ -38,18 +38,13 @@ export function solveBoxLayout(boxes: BoxItem[]): SolveResult {
     );
 
     if (freeBoxes.length > 0) {
-      // Prioritize boxes that unblock the most other boxes
+      // Pick free box furthest from board center (0, -2.5) for natural outside-in peeling
       let bestBox = freeBoxes[0];
-      let maxUnblocked = -1;
-
+      let maxDistSq = -1;
       for (const candidate of freeBoxes) {
-        const simulatedRemaining = remaining.filter((b) => b.id !== candidate.id);
-        const newlyFreeCount = simulatedRemaining.filter(
-          (b) => !isBoxFrozen(b) && !checkExitPath(b, simulatedRemaining).isBlocked
-        ).length;
-
-        if (newlyFreeCount > maxUnblocked) {
-          maxUnblocked = newlyFreeCount;
+        const dSq = candidate.x * candidate.x + (candidate.z + 2.5) * (candidate.z + 2.5);
+        if (dSq > maxDistSq) {
+          maxDistSq = dSq;
           bestBox = candidate;
         }
       }
