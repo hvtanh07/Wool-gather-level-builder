@@ -83,6 +83,14 @@ interface TunnelDispenseAnim {
   progress: number;
 }
 
+interface TunnelDisappearAnim {
+  id: number;
+  x: number;
+  z: number;
+  angle: number;
+  progress: number;
+}
+
 // Fog covers the first 1/3 of the moving path (progress 0.0 to 1/3).
 // Boxes cannot scan or retrieve segments that are inside this fog area.
 const FOG_BOUNDARY = 1 / 3;
@@ -157,6 +165,7 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
     iceAttacks: IceAttack[];
     iceParticles: IceParticle[];
     tunnelDispenses: TunnelDispenseAnim[];
+    tunnelDisappears: TunnelDisappearAnim[];
   }>({
     isPlaying: true,
     gameSpeed: 1.0,
@@ -181,6 +190,7 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
     iceAttacks: [],
     iceParticles: [],
     tunnelDispenses: [],
+    tunnelDisappears: [],
   });
 
   // Keep control props synced to engineRef
@@ -253,6 +263,7 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
       iceAttacks: [],
       iceParticles: [],
       tunnelDispenses: [],
+      tunnelDisappears: [],
     };
 
     setGameState('playing');
@@ -281,11 +292,11 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
 
     // 2. Tunnel structures and ready boxes
     for (const tun of engine.tunnels) {
-      if (tun.queue.length > 0) {
-        const readyBox = getTunnelReadyBox(tun);
-        if (readyBox && readyBox.id !== excludeBoxId) {
-          obstacles.push(readyBox);
-        }
+      if (tun.queue.length === 0) continue; // Tunnel has spawned all boxes, disappeared, and no longer blocks!
+
+      const readyBox = getTunnelReadyBox(tun);
+      if (readyBox && readyBox.id !== excludeBoxId) {
+        obstacles.push(readyBox);
       }
       obstacles.push({
         id: -tun.id * 100,
@@ -617,6 +628,15 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
           td.progress += dt * 4.0;
           if (td.progress >= 1.0) {
             engine.tunnelDispenses.splice(d, 1);
+          }
+        }
+
+        // Update Tunnel Disappear Animations
+        for (let d = engine.tunnelDisappears.length - 1; d >= 0; d--) {
+          const td = engine.tunnelDisappears[d];
+          td.progress += dt * 3.0; // ~0.33s animation
+          if (td.progress >= 1.0) {
+            engine.tunnelDisappears.splice(d, 1);
           }
         }
 
@@ -1564,6 +1584,8 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
     // DRAW TUNNELS IN PLAYTEST (Shown as 2 objects: Tunnel structure & Ready Box in front)
     // -------------------------------------------------------------
     engine.tunnels.forEach((tun) => {
+      if (tun.queue.length === 0) return; // Tunnel has spawned all boxes inside, so it disappears!
+
       const tScreen = boardToScreen(tun.x, tun.z, width, height);
       const tunDim = BOX_DIMENSIONS.Box6;
       const tunW = tunDim.width * effectiveZoom;
@@ -1762,6 +1784,34 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
 
         ctx.restore();
       }
+    });
+
+    // Draw collapsing tunnels disappearing after spawning all boxes
+    engine.tunnelDisappears.forEach((td) => {
+      const tScreen = boardToScreen(td.x, td.z, width, height);
+      const tunDim = BOX_DIMENSIONS.Box6;
+      const tunW = tunDim.width * effectiveZoom;
+      const tunH = tunDim.length * effectiveZoom;
+      const scale = Math.max(0, 1 - td.progress * 0.4);
+      const alpha = Math.max(0, 1 - td.progress);
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.translate(tScreen.x, tScreen.y);
+      ctx.rotate((td.angle * Math.PI) / 180);
+      ctx.scale(scale, scale);
+
+      const ax = -tunW / 2;
+      const ay = -tunH / 2;
+      ctx.beginPath();
+      ctx.roundRect(ax, ay, tunW, tunH, 7 * engine.boardZoomScale);
+      ctx.fillStyle = '#334155';
+      ctx.fill();
+      ctx.strokeStyle = '#94a3b8';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      ctx.restore();
     });
 
     // Check exit status for all board boxes
@@ -2260,10 +2310,39 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
           sourceScreenPos: { x: boxSc.x, y: boxSc.y },
         };
 
-        // Instantly dispense next bus from queue!
+        // Instantly dispense next bus from queue, or disappear tunnel if queue empty!
         if (tun.queue.length > 0) {
           sounds.playTunnelDispense();
           engine.tunnelDispenses.push({ tunnelId: tun.id, progress: 0 });
+        } else {
+          // All boxes from this tunnel have now been spawned!
+          // Tunnel disappears with poof effect and stops blocking other boxes!
+          sounds.playPop();
+          engine.tunnelDisappears.push({
+            id: tun.id,
+            x: tun.x,
+            z: tun.z,
+            angle: tun.angle,
+            progress: 0,
+          });
+
+          // Spawn puff particles around the disappearing tunnel
+          const tScreen = boardToScreen(tun.x, tun.z, width, height);
+          for (let p = 0; p < 25; p++) {
+            const ang = Math.random() * Math.PI * 2;
+            const spd = 40 + Math.random() * 100;
+            engine.iceParticles.push({
+              x: tScreen.x,
+              y: tScreen.y,
+              vx: Math.cos(ang) * spd,
+              vy: Math.sin(ang) * spd,
+              size: 3 + Math.random() * 5,
+              alpha: 1.0,
+              rot: Math.random() * Math.PI * 2,
+              rotSpeed: (Math.random() - 0.5) * 8,
+              color: Math.random() > 0.4 ? '#94a3b8' : '#e2e8f0',
+            });
+          }
         }
         return;
       }
