@@ -17,6 +17,9 @@ import {
   Trash2,
   FolderOpen,
   Dices,
+  ListOrdered,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 
 interface TopNavbarProps {
@@ -28,6 +31,11 @@ interface TopNavbarProps {
   onClearBoard?: () => void;
   onImportLevel?: (data: CleanLevelData) => void;
   onRandomizeLayout?: () => void;
+  levelIndex: number;
+  levelCount: number;
+  onOpenLevelList: () => void;
+  onPrevLevel: () => void;
+  onNextLevel: () => void;
 }
 
 export const TopNavbar: React.FC<TopNavbarProps> = ({
@@ -39,6 +47,11 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
   onClearBoard,
   onImportLevel,
   onRandomizeLayout,
+  levelIndex,
+  levelCount,
+  onOpenLevelList,
+  onPrevLevel,
+  onNextLevel,
 }) => {
   const [soundOn, setSoundOn] = React.useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -81,6 +94,35 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
         </div>
 
         <div className="h-5 w-px bg-slate-800" />
+
+        {/* Level list: open panel + previous / next level */}
+        <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg text-xs">
+          <button
+            onClick={onPrevLevel}
+            disabled={levelIndex <= 0}
+            className="px-1.5 py-1 text-slate-400 hover:text-white disabled:opacity-30"
+            title="Previous level"
+          >
+            <ChevronLeft className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={onOpenLevelList}
+            className="flex items-center gap-1.5 px-2 py-1 border-x border-slate-800 text-slate-200 hover:text-white hover:bg-slate-800 font-semibold"
+            title="Open level list"
+          >
+            <ListOrdered className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Levels</span>
+            <span className="font-mono text-slate-400">{levelIndex + 1}/{levelCount}</span>
+          </button>
+          <button
+            onClick={onNextLevel}
+            disabled={levelIndex >= levelCount - 1}
+            className="px-1.5 py-1 text-slate-400 hover:text-white disabled:opacity-30"
+            title="Next level"
+          >
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
 
         {/* Level ID & Type */}
         <div className="flex items-center gap-2">
@@ -131,7 +173,7 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
               }
             }}
             defaultValue=""
-            className="bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 rounded-lg px-2 py-1 text-xs focus:outline-none cursor-pointer"
+            className="w-32 bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 rounded-lg px-2 py-1 text-xs focus:outline-none cursor-pointer"
           >
             <option value="" disabled>
               Load preset...
