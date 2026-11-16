@@ -61,6 +61,7 @@ export interface CatPosition {
 export interface DragonSetup {
   speed: number; // track progress per second (e.g. 0.02)
   track: TrackPoint[];
+  trackId?: number; // track preset ID from the level sheet (kept as-is; the builder draws the default track)
   catPositions: CatPosition[];
   sections: DragonSection[];
 }
