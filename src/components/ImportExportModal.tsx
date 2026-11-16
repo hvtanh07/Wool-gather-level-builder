@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { CleanLevelData, LegacyLvMap } from '../types/level';
-import { convertLegacyLvMapToClean } from '../data/demoLevel';
+import { convertLegacyLvMapToClean, DEFAULT_TRACK, DEFAULT_CAT_POSITIONS } from '../data/demoLevel';
 import { sounds } from '../utils/audio';
 import {
   Copy,
@@ -16,6 +16,32 @@ import {
   Sparkles,
 } from 'lucide-react';
 
+const isPointList = (v: unknown): boolean =>
+  Array.isArray(v) &&
+  v.length >= 2 &&
+  v.every((p) => p && typeof p.x === 'number' && typeof p.y === 'number');
+
+// Fill in dragon fields the builder needs but the imported JSON lacks or stores
+// in another shape (e.g. "track": 2 instead of a list of points, or no
+// "catPositions"). Without this, Playtest crashes and the page goes blank.
+function normalizeCleanLevel(level: CleanLevelData): CleanLevelData {
+  const dragon = (level.dragon ?? {}) as Partial<CleanLevelData['dragon']>;
+  return {
+    ...level,
+    tunnels: Array.isArray(level.tunnels) ? level.tunnels : [],
+    conveyors: Array.isArray(level.conveyors) ? level.conveyors : [],
+    dragon: {
+      ...dragon,
+      speed: typeof dragon.speed === 'number' ? dragon.speed : 0.015,
+      track: isPointList(dragon.track) ? dragon.track! : DEFAULT_TRACK.map((p) => ({ ...p })),
+      catPositions: Array.isArray(dragon.catPositions)
+        ? dragon.catPositions
+        : DEFAULT_CAT_POSITIONS.map((c) => ({ ...c })),
+      sections: Array.isArray(dragon.sections) ? dragon.sections : [],
+    },
+  };
+}
+
 export function parseLevelJson(jsonText: string): CleanLevelData {
   const parsed = JSON.parse(jsonText);
 
@@ -26,7 +52,7 @@ export function parseLevelJson(jsonText: string): CleanLevelData {
 
   // Check if clean format (contains version, camera, dragon, boxes with x, z)
   if (parsed.boxes && Array.isArray(parsed.boxes)) {
-    return parsed as CleanLevelData;
+    return normalizeCleanLevel(parsed as CleanLevelData);
   }
 
   throw new Error('Unrecognized JSON format. Must contain a "boxes" array.');
