@@ -49,8 +49,10 @@ Wool-gather-level-builder/
 │   ├── data/
 │   │   └── demoLevel.ts        # Pre-loaded Demo Level 110089 (49 boxes), starter & empty presets
 │   ├── components/
-│   │   ├── TopNavbar.tsx       # Metadata, camera size, 4+ active slots selector, presets
-│   │   ├── Sidebar.tsx         # Box adding tools, color palette, direction buttons, alignment
+│   │   ├── LevelRail.tsx       # Left level list: filter, new/copy/move/delete, status dot, import/export all
+│   │   ├── Toolbar.tsx         # Level title, Design | Play test, undo/redo, snap, rays, random, clear, JSON
+│   │   ├── Inspector.tsx       # Right tabs: Level, Boxes, Dragon, Check (audit + bot), JSON
+│   │   ├── Sidebar.tsx         # Boxes tab: box adding tools, color palette, direction buttons, alignment
 │   │   ├── CanvasEditor.tsx    # Interactive 2D board canvas, real-time solver HUD, drag & drop
 │   │   ├── DragonEditor.tsx    # Dragon wool timeline, auto-generate dragon trigger & difficulty
 │   │   ├── PlaytestView.tsx    # 60 FPS playable simulation (Dragon, Cat, Slots, Yarn threads)
@@ -324,9 +326,10 @@ The 8 official wool color IDs and their hex assignments:
   - "Select Stuck" button immediately grabs deadlocked boxes.
 
 ### 5.6 Right-Side Dragon Configuration Panel (`src/components/DragonEditor.tsx`)
-- **3-Column Workspace Layout**:
-  - `[Left Sidebar: Box Tools] | [Center: Full-Height Canvas] | [Right Sidebar: Dragon Config Zone]`
-- **Right Sidebar Capabilities**:
+- **Workspace layout** (same pattern as the team's Jelly Smash and Card Sort builders):
+  - `[Left: level list] | [Center: toolbar + board or playtest] | [Right: inspector tabs Level / Boxes / Dragon / Check / JSON]`
+  - The list dot is red when the level has layout errors (overlap, blocked tunnel, stuck, wool mismatch) and yellow for warnings; the **Check** tab lists them, selects the boxes, runs the bot and shows the most similar level.
+- **Dragon tab capabilities**:
   - **Wool Balance Pill**: Compares total dragon wool vs box wool (`Dragon: X / Boxes: Y`), showing instant match status or difference (`+N excess` / `-N needed`).
   - **Auto-Generate Solvable Dragon**: 1-click solver generating guaranteed 100% solvable wool sequences under `Easy`, `Normal`, or `Hard` difficulties.
   - **Collapsible Track & Speed Controls**: Adjust dragon crawl speed (`0.005` to `0.05`), review fog zone bounds, start gate, and cat checkpoints.
@@ -335,7 +338,6 @@ The 8 official wool color IDs and their hex assignments:
     - Real-time swatch with wool color name and unit count adjuster (`-`, number, `+`).
     - Up / Down reordering buttons and Delete button.
     - Click any segment to expand the 8-color swatch palette for instant color replacement.
-  - **Collapse / Expand Toggle**: Allows collapsing into a sleek 48px icon strip to maximize canvas space.
   - **Quick Playtest Action**: Direct launch into Playtest mode.
 
 ### 5.7 Advanced Gameplay Elements & Gimmicks

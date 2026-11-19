@@ -168,7 +168,7 @@ export const DragonEditor: React.FC<DragonEditorProps> = ({
 
   // Expanded Right Sidebar View
   return (
-    <div className="w-88 flex-shrink-0 bg-slate-900 border-l border-slate-800 flex flex-col h-full text-slate-200 select-none shadow-2xl relative z-20">
+    <div className="w-full flex-1 min-h-0 bg-slate-900 flex flex-col text-slate-200 select-none relative">
       {/* 1. Sidebar Top Header */}
       <div className="p-3 border-b border-slate-800 bg-slate-950/70 flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -194,13 +194,6 @@ export const DragonEditor: React.FC<DragonEditorProps> = ({
             <Sliders className="w-3.5 h-3.5" />
           </button>
 
-          <button
-            onClick={() => setIsCollapsed(true)}
-            className="p-1.5 bg-slate-800/60 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg border border-slate-700/60 transition"
-            title="Collapse Sidebar"
-          >
-            <CollapseIcon className="w-3.5 h-3.5" />
-          </button>
         </div>
       </div>
 
