@@ -1,5 +1,5 @@
 import { BoxItem, BoxNumType } from '../types/level';
-import { BOX_DIMENSIONS } from './colors';
+import { BOX_DIMENSIONS, BOX_WIDTH } from './colors';
 import { checkExitPath } from './collision';
 
 interface BoxAABB {
@@ -119,13 +119,13 @@ export function generateRandomTightLayout(targetCount = 49): BoxItem[] {
       const candidates: { numType: BoxNumType; isVert: boolean; w: number; l: number }[] = [];
 
       if (isHorizontal) {
-        if (remainingX >= 0.54) candidates.push({ numType: 'Box4', isVert: false, w: 0.54, l: 0.54 });
-        if (remainingX >= 0.76) candidates.push({ numType: 'Box6', isVert: false, w: 0.54, l: 0.76 });
-        if (remainingX >= 0.98) candidates.push({ numType: 'Box10', isVert: false, w: 0.54, l: 0.98 });
+        if (remainingX >= BOX_DIMENSIONS.Box4.length) candidates.push({ numType: 'Box4', isVert: false, w: BOX_WIDTH, l: BOX_DIMENSIONS.Box4.length });
+        if (remainingX >= BOX_DIMENSIONS.Box6.length) candidates.push({ numType: 'Box6', isVert: false, w: BOX_WIDTH, l: BOX_DIMENSIONS.Box6.length });
+        if (remainingX >= BOX_DIMENSIONS.Box10.length) candidates.push({ numType: 'Box10', isVert: false, w: BOX_WIDTH, l: BOX_DIMENSIONS.Box10.length });
       } else {
-        if (remainingX >= 0.54) candidates.push({ numType: 'Box4', isVert: true, w: 0.54, l: 0.54 });
-        if (remainingX >= 0.54) candidates.push({ numType: 'Box6', isVert: true, w: 0.54, l: 0.76 });
-        if (r < rowCount - 1 && remainingX >= 0.54) candidates.push({ numType: 'Box10', isVert: true, w: 0.54, l: 0.98 });
+        if (remainingX >= BOX_WIDTH) candidates.push({ numType: 'Box4', isVert: true, w: BOX_WIDTH, l: BOX_DIMENSIONS.Box4.length });
+        if (remainingX >= BOX_WIDTH) candidates.push({ numType: 'Box6', isVert: true, w: BOX_WIDTH, l: BOX_DIMENSIONS.Box6.length });
+        if (r < rowCount - 1 && remainingX >= BOX_WIDTH) candidates.push({ numType: 'Box10', isVert: true, w: BOX_WIDTH, l: BOX_DIMENSIONS.Box10.length });
       }
 
       candidates.sort(() => Math.random() - 0.5);
@@ -167,7 +167,7 @@ export function generateRandomTightLayout(targetCount = 49): BoxItem[] {
   if (boxes.length < targetCount) {
     for (let r = 0; r < rowCount && boxes.length < targetCount; r++) {
       const rowZ = rowZs[r];
-      for (let x = minX; x <= maxX - 0.54 && boxes.length < targetCount; x += 0.22) {
+      for (let x = minX; x <= maxX - BOX_WIDTH && boxes.length < targetCount; x += 0.22) {
         const cand: BoxItem & { isVert?: boolean } = {
           id: nextId,
           x: Number((x + 0.27).toFixed(3)),

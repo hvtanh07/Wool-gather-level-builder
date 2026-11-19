@@ -180,12 +180,13 @@ The tool includes a built-in bidirectional converter in `src/data/demoLevel.ts`:
   - $180^\circ$: Points **Down** ($-Z$, vector $[0, -1]$)
   - $270^\circ$: Points **Left** ($-X$, vector $[-1, 0]$)
 
-### 4.2 Calibrated Non-Clipping Box Dimensions
-In `src/utils/colors.ts`, dimensions are calibrated against the real game grid:
-- **Width**: `0.54` (for all boxes, ensuring a clean $\approx 0.17$ gap between parallel columns).
-- **Box4**: `width: 0.54, length: 0.54` (4 wool capacity).
-- **Box6**: `width: 0.54, length: 0.76` (6 wool capacity).
-- **Box10**: `width: 0.54, length: 0.98` (10 wool capacity; fits within the $1.12$ pitch without overlapping end-to-end neighbors).
+### 4.2 Box Dimensions (matched to the game build)
+In `src/utils/colors.ts`, dimensions match the game build (measured on 2026-11-19 from an in-game screenshot of level 15, 1 world unit = 66.6 px, where boxes touch without overlapping):
+- **Width**: `0.64` for all boxes.
+- **Box4**: length `0.70`. **Box6**: length `0.90`. **Box10**: length `1.10`.
+The previous values (width `0.54`, lengths `0.54 / 0.76 / 0.98`) left a deliberate gap and were smaller than the game. Exit rays, overlaps and the level checks all use these sizes.
+
+Run `npm run audit` to check every built-in level (overlaps, boxes in front of tunnels, deadlocks, wool totals, a bot play test, and similar layouts). `OLD_SIZES=1 npm run audit` repeats it with the old sizes.
 
 ### 4.3 Slot Configuration
 - Levels default to **at least 4 active slots** (`slots.unlockedCount: 4`).

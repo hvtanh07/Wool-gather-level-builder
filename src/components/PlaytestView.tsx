@@ -202,16 +202,30 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
     engineRef.current.gameSpeed = gameSpeed;
   }, [gameSpeed]);
 
+  // Cumulative lengths along the dragon track (world units)
+  const trackGeom = React.useMemo(() => {
+    const track = levelData.dragon.track || [];
+    const cum = [0];
+    for (let i = 1; i < track.length; i++) {
+      cum.push(cum[i - 1] + Math.hypot(track[i].x - track[i - 1].x, track[i].y - track[i - 1].y));
+    }
+    return { cum, total: cum[cum.length - 1] || 1 };
+  }, [levelData.dragon.track]);
+
   // Spline interpolation for dragon track
   const getTrackPointAt = useCallback(
     (progress: number): { x: number; y: number; angle: number } => {
       const track = levelData.dragon.track;
       if (!track || track.length < 2) return { x: 0, y: 5, angle: 0 };
 
+      // Arc-length parametrisation: equal progress steps are equal distances along
+      // the track, so dragon segments sit evenly spaced like in the game build.
       const clampedP = Math.max(0, Math.min(progress, 0.9999));
-      const totalSegments = track.length - 1;
-      const segIndex = Math.min(Math.floor(clampedP * totalSegments), totalSegments - 1);
-      const segT = clampedP * totalSegments - segIndex;
+      const target = clampedP * trackGeom.total;
+      let segIndex = 0;
+      while (segIndex < track.length - 2 && trackGeom.cum[segIndex + 1] < target) segIndex++;
+      const segLen = trackGeom.cum[segIndex + 1] - trackGeom.cum[segIndex] || 1;
+      const segT = Math.max(0, Math.min(1, (target - trackGeom.cum[segIndex]) / segLen));
 
       const p0 = track[segIndex];
       const p1 = track[segIndex + 1];
@@ -225,7 +239,7 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
 
       return { x, y, angle };
     },
-    [levelData.dragon.track]
+    [levelData.dragon.track, trackGeom]
   );
 
   // Initialize or Reset the game
@@ -900,6 +914,9 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
       y: leftCy - (wy - trackMidY) * leftAreaZoom,
     });
 
+    // One segment step on screen; knots are drawn with this diameter so they touch
+    const knotR = Math.max(5, Math.min(20, (SEG_STEP * trackGeom.total * leftAreaZoom) / 2));
+
     if (track && track.length > 1) {
       // Draw Road Track
       ctx.beginPath();
@@ -911,14 +928,14 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
       }
 
       // Outer Road Curb / Warm Border (matches reference image)
-      ctx.lineWidth = 36;
+      ctx.lineWidth = knotR * 2 + 10;
       ctx.strokeStyle = '#e2b078';
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.stroke();
 
       // Warm Sand Road Bed (matches reference image)
-      ctx.lineWidth = 28;
+      ctx.lineWidth = knotR * 2 + 4;
       ctx.strokeStyle = '#fed7aa';
       ctx.stroke();
 
@@ -1054,7 +1071,8 @@ export const PlaytestView: React.FC<PlaytestViewProps> = ({ levelData, onExit })
       ): number => {
         const col = getWoolColor(sec.color);
         const knotCount = Math.min(sec.count, 25);
-        const knotRadius = 12;
+        // Segments touch their neighbours, like the game build
+        const knotRadius = knotR;
         const isSectionGathering = activeColors.has(col.hex);
 
         let currP = startProgress;

@@ -87,24 +87,30 @@ export interface BoxDimDef {
   length: number; // Z span before rotation (along direction)
 }
 
+// Box footprints in world units, matched to the game build (2026-11-19).
+// Measured from an in-game screenshot of level 15 (1 world unit = 66.6 px): the
+// boxes there touch without overlapping, which fixes width 0.64 and lengths
+// 0.70 / 0.90 / 1.10. The old values (width 0.54, lengths 0.54 / 0.76 / 0.98)
+// left a deliberate ~0.17 gap and were smaller than the game.
+export const BOX_WIDTH = 0.64;
 export const BOX_DIMENSIONS: Record<BoxNumType, BoxDimDef> = {
   Box4: {
     numType: 'Box4',
     capacity: 4,
-    width: 0.54,
-    length: 0.54,
+    width: BOX_WIDTH,
+    length: 0.7,
   },
   Box6: {
     numType: 'Box6',
     capacity: 6,
-    width: 0.54,
-    length: 0.76,
+    width: BOX_WIDTH,
+    length: 0.9,
   },
   Box10: {
     numType: 'Box10',
     capacity: 10,
-    width: 0.54,
-    length: 0.98,
+    width: BOX_WIDTH,
+    length: 1.1,
   },
 };
 
