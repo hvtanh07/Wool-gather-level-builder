@@ -158,11 +158,11 @@ export function checkExitPath(
     const dx = target.x - sourceBox.x;
     const dz = target.z - sourceBox.z;
     const dotForward = dx * src.direction.x + dz * src.direction.z;
-    if (dotForward < 0.01 || dotForward > minHitDist + 0.6) continue;
+    if (dotForward < 0.01 || dotForward > minHitDist + 0.75) continue;
 
     // Fast lateral corridor culling: target must be within corridor width + target radius
     const dotSide = Math.abs(dx * src.right.x + dz * src.right.z);
-    if (dotSide > hw + 0.55) continue;
+    if (dotSide > hw + 0.75) continue;
 
     // Precalculate target segments once for all 5 rays
     const targetCorners = getBoxCorners(target);
