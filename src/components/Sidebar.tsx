@@ -13,8 +13,6 @@ import {
   ArrowRight,
   ArrowDown,
   ArrowLeft,
-  Eye,
-  Grid,
   AlignLeft,
   AlignRight,
   ArrowUpToLine,
@@ -25,7 +23,6 @@ import {
   ChevronUp,
   ChevronDown,
   Settings,
-  Dices,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -39,13 +36,7 @@ interface SidebarProps {
   setActiveNumType: (nt: BoxNumType) => void;
   activeBoxType?: BoxType;
   setActiveBoxType?: (bt: BoxType) => void;
-  gridSnap: number;
-  setGridSnap: (snap: number) => void;
-  showRays: boolean;
-  setShowRays: (show: boolean) => void;
   onAddBox: (numType: BoxNumType, color: number, boxType?: BoxType, angle?: number) => void;
-  onClearBoard?: () => void;
-  onRandomizeLayout?: () => void;
   // Tunnel props
   tunnels?: TunnelSetup[];
   onUpdateTunnels?: (tunnels: TunnelSetup[]) => void;
@@ -86,13 +77,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setActiveNumType,
   activeBoxType = 'Normal',
   setActiveBoxType,
-  gridSnap,
-  setGridSnap,
-  showRays,
-  setShowRays,
   onAddBox,
-  onClearBoard,
-  onRandomizeLayout,
   tunnels = [],
   onUpdateTunnels,
   selectedTunnelId,
@@ -331,7 +316,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   return (
-    <div className="w-72 bg-slate-900 border-r border-slate-800 flex flex-col h-full text-slate-200 select-none overflow-y-auto scrollbar-thin">
+    <div className="w-full flex-1 min-h-0 bg-slate-900 flex flex-col text-slate-200 select-none overflow-y-auto scrollbar-thin">
       {/* 1. Quick Add Box Section */}
       <div className="p-3 border-b border-slate-800/80 space-y-2.5">
         <div className="flex items-center justify-between">
@@ -1392,79 +1377,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       )}
 
-      {/* 6. View & Grid Settings */}
-      <div className="p-3 space-y-3 mt-auto">
-        <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
-          Canvas Settings
-        </label>
-
-        {/* Snap to grid */}
-        <div className="flex items-center justify-between text-xs">
-          <div className="flex items-center gap-1.5 text-slate-300">
-            <Grid className="w-3.5 h-3.5 text-slate-400" />
-            <span>Grid Snap</span>
-          </div>
-          <select
-            value={gridSnap}
-            onChange={(e) => setGridSnap(parseFloat(e.target.value))}
-            className="bg-slate-950 border border-slate-700 rounded px-2 py-0.5 text-slate-300 text-xs font-mono"
-          >
-            <option value={0}>Free (Off)</option>
-            <option value={0.1}>0.1 units</option>
-            <option value={0.25}>0.25 units</option>
-            <option value={0.5}>0.5 units</option>
-            <option value={1.0}>1.0 unit</option>
-          </select>
-        </div>
-
-        {/* Show exit rays */}
-        <div className="flex items-center justify-between text-xs">
-          <div className="flex items-center gap-1.5 text-slate-300">
-            <Eye className="w-3.5 h-3.5 text-slate-400" />
-            <span>Show Exit Rays</span>
-          </div>
-          <button
-            onClick={() => setShowRays(!showRays)}
-            className={`w-9 h-5 rounded-full p-0.5 transition-colors ${
-              showRays ? 'bg-cyan-600' : 'bg-slate-800'
-            }`}
-          >
-            <div
-              className={`w-4 h-4 rounded-full bg-white transition-transform ${
-                showRays ? 'translate-x-4' : 'translate-x-0'
-              }`}
-            />
-          </button>
-        </div>
-
-        {/* Randomize Layout Button */}
-        {onRandomizeLayout && (
-          <div className="pt-1 border-t border-slate-800/60">
-            <button
-              onClick={onRandomizeLayout}
-              className="w-full py-1.5 bg-indigo-950/40 hover:bg-indigo-900/60 border border-indigo-700/50 hover:border-indigo-500 text-indigo-300 hover:text-white rounded-lg text-xs font-semibold transition flex items-center justify-center gap-1.5 active:scale-95 shadow-sm"
-              title="Generate randomized 49-box tight fit layout (similar to 49-box demo preset)"
-            >
-              <Dices className="w-3.5 h-3.5 text-indigo-300" />
-              <span>Randomize Layout (49)</span>
-            </button>
-          </div>
-        )}
-
-        {/* Clear Entire Board Button */}
-        {onClearBoard && (
-          <div className="pt-1 border-t border-slate-800/60">
-            <button
-              onClick={onClearBoard}
-              className="w-full py-1.5 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/40 hover:border-rose-600 text-rose-300 hover:text-white rounded-lg text-xs font-semibold transition flex items-center justify-center gap-1.5 active:scale-95 shadow-sm"
-              title="Clear all boxes, elements (tunnels, conveyors), and dragon config"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Clear Entire Board</span>
-            </button>
-          </div>
-        )}
-      </div>
     </div>
   );
 };
