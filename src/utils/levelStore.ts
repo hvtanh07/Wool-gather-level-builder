@@ -7,12 +7,14 @@ const STORAGE_KEY = 'wool-gather-level-list-v1';
 // Bump when the built-in pack changes and add the changed level ids to PACK_CHANGES. A list saved
 // with an older pack gets those levels swapped in from the pack (other levels and edits stay); the
 // old list is kept under a backup key.
-const PACK_VERSION = '2026-11-24b';
+const PACK_VERSION = '2026-11-24c';
 const PACK_CHANGES: { version: string; levelIds: number[] }[] = [
   // Redesign of broken, too hard and look-alike levels
   { version: '2026-11-24', levelIds: Object.keys(LEVEL_NOTES).map(Number).filter((id) => LEVEL_NOTES[id].redesigned) },
   // Boxes pushed apart so none overlap
   { version: '2026-11-24b', levelIds: [1, 6, 16, 17, 36] },
+  // All levels spaced so boxes have a small gap (scripts/space-boxes.ts).
+  { version: '2026-11-24c', levelIds: Array.from({ length: 40 }, (_, i) => i + 1) },
 ];
 
 function changedSince(savedVersion: string | undefined): Set<number> {
