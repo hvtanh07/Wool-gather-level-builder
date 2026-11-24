@@ -174,7 +174,7 @@ interface Pickable {
   take: () => void;
 }
 
-class Board {
+export class Board {
   boxes: BoxItem[];
   tunnels: TunnelSetup[];
   conveyorBoxes: { box: BoxItem; z: number; minX: number; maxX: number }[];
@@ -342,11 +342,38 @@ interface Slot {
   leaving?: number;
 }
 
+/** How a bot player plays. The five tiers below go from a very good player to a very weak one. */
+export interface BotSkill {
+  /** 0 = always the best-looking box; higher = more random picks */
+  temperature: number;
+  /** Seconds between two taps (reaction time) */
+  tapDelay: number;
+  /** Looks one move ahead: values a box by the boxes it frees */
+  lookahead: boolean;
+  /** Chance (0..1) to wait instead of parking a box whose color is still deep in the fog */
+  discipline: number;
+  /** Breaks ice on purpose when the frozen box is the color the dragon needs */
+  smartIce: boolean;
+}
+
+export const BOT_TIERS: { key: string; name: string; skill: BotSkill }[] = [
+  { key: 'expert', name: 'Very good', skill: { temperature: 0.05, tapDelay: 0.35, lookahead: true, discipline: 1, smartIce: true } },
+  { key: 'good', name: 'Good', skill: { temperature: 0.3, tapDelay: 0.5, lookahead: true, discipline: 0.9, smartIce: true } },
+  { key: 'average', name: 'Average', skill: { temperature: 0.8, tapDelay: 0.8, lookahead: false, discipline: 0.75, smartIce: false } },
+  { key: 'weak', name: 'Weak', skill: { temperature: 1.6, tapDelay: 1.1, lookahead: false, discipline: 0.45, smartIce: false } },
+  { key: 'poor', name: 'Very weak', skill: { temperature: 4, tapDelay: 1.5, lookahead: false, discipline: 0.15, smartIce: false } },
+];
+
 /**
- * One run of a simple bot. temperature 0 = always the best-looking box; higher = more random.
+ * One run of a bot. `skill` is a BotSkill, or a number (old API: temperature only, default tap speed).
  * The bot sees the board like a player: it prefers boxes whose color is close to the dragon head.
  */
-export function playOnce(level: CleanLevelData, temperature: number, rng: () => number): BotResult {
+export function playOnce(level: CleanLevelData, skillOrTemp: BotSkill | number, rng: () => number): BotResult {
+  const skill: BotSkill =
+    typeof skillOrTemp === 'number'
+      ? { temperature: skillOrTemp, tapDelay: 0.35, lookahead: false, discipline: 1, smartIce: false }
+      : skillOrTemp;
+  const temperature = skill.temperature;
   const board = new Board(level);
   const sections = level.dragon.sections.map((s) => ({ ...s }));
   const slotCount = level.slots?.unlockedCount ?? level.slots?.count ?? 4;
@@ -375,6 +402,35 @@ export function playOnce(level: CleanLevelData, temperature: number, rng: () => 
       run += s.count;
     }
     return 999; // color no longer on the dragon
+  };
+
+  // Wool of a color outside the fog, and what the parked boxes of that color still need
+  const openWool = (color: number) => {
+    let run = 0;
+    let n = 0;
+    for (const sec of sections) {
+      const startP = p - run * SEG_STEP;
+      if (sec.color === color && startP >= FOG_BOUNDARY)
+        n += Math.min(sec.count, Math.floor((startP - FOG_BOUNDARY) / SEG_STEP) + 1);
+      run += sec.count;
+    }
+    return n;
+  };
+  const slotNeed = (color: number) =>
+    slots.reduce((a, s) => a + (s && s.color === color && s.leaving === undefined ? s.capacity - s.filled : 0), 0);
+
+  // Looking one move ahead: how many needed boxes (color close to the head) taking `o` would free
+  const unlockCount = (o: Pickable, before: Set<string>) => {
+    const saved = { boxes: board.boxes, conv: board.conveyorBoxes };
+    const tunnelQueues = board.tunnels.map((t) => [...t.queue]);
+    o.take();
+    let n = 0;
+    for (const q of board.pickable()) if (!before.has(q.key) && colorScore(q.box.color) < 25) n++;
+    board.boxes = saved.boxes;
+    board.tunnels.forEach((t, i) => (t.queue = tunnelQueues[i]));
+    board.conveyorBoxes = saved.conv;
+    board.changed();
+    return n;
   };
 
   while (t < 900) {
@@ -458,17 +514,32 @@ export function playOnce(level: CleanLevelData, temperature: number, rng: () => 
     if (tapCooldown <= 0 && freeSlot !== -1) {
       let options = board.pickable();
       if (!options.length && board.crackIce()) {
-        tapCooldown = 0.4;
+        tapCooldown = skill.tapDelay + 0.05;
         continue;
       }
       // Don't fill a slot with a color the dragon has no more of
       options = options.filter((o) => colorScore(o.box.color) < 999);
       if (options.length) {
-        const scored = options.map((o) => ({ o, s: colorScore(o.box.color) }));
+        const before = skill.lookahead ? new Set(options.map((o) => o.key)) : null;
+        const scored = options.map((o) => {
+          let s = colorScore(o.box.color);
+          // A good player does not park a second box of a color whose open wool is already spoken for
+          if (before && s < 40 && openWool(o.box.color) <= slotNeed(o.box.color)) s += 40;
+          // A good player prefers the box that also opens the way to boxes the dragon needs soon
+          if (before) {
+            const n = unlockCount(o, before);
+            if (n) s = s >= 40 ? Math.min(s, 30) : s - Math.min(6, 2 * n);
+          }
+          return { o, s };
+        });
         // Wait rather than parking a box whose color is still deep in the fog, unless slots are mostly empty
         const used = slots.filter(Boolean).length;
         const best = Math.min(...scored.map((x) => x.s));
-        if (best < 40 || used <= 1) {
+        if (best >= 40 && skill.smartIce && board.crackIce()) {
+          tapCooldown = skill.tapDelay + 0.05;
+          continue;
+        }
+        if (best < 40 || used <= 1 || rng() > skill.discipline) {
           let pick = scored[0];
           if (temperature <= 0) {
             pick = scored.reduce((a, b) => (b.s < a.s ? b : a));
@@ -485,7 +556,9 @@ export function playOnce(level: CleanLevelData, temperature: number, rng: () => 
           }
           pick.o.take();
           slots[freeSlot] = { color: pick.o.box.color, capacity: pick.o.box.capacity, filled: 0, fly: 0 };
-          tapCooldown = 0.35;
+          tapCooldown = skill.tapDelay;
+        } else {
+          tapCooldown = skill.tapDelay / 2;
         }
       }
     }
@@ -535,6 +608,42 @@ export function botEstimate(level: CleanLevelData, runs = 40, seed = 1): BotSumm
   }
   const typicalLoss = [...losses.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
   return { runs, wins, bestMargin, avgTime: tSum / runs, typicalLoss };
+}
+
+export interface TierResult {
+  key: string;
+  name: string;
+  runs: number;
+  wins: number;
+  winRate: number;
+  avgMargin: number;
+}
+
+/** Win rate for each bot tier, from very good to very weak. */
+export function botTiers(level: CleanLevelData, runs = 40, seed = 7, tiers = BOT_TIERS): TierResult[] {
+  return tiers.map((tier, ti) => {
+    const rng = mulberry32(seed + ti * 1000);
+    let wins = 0;
+    let m = 0;
+    for (let i = 0; i < runs; i++) {
+      const r = playOnce(level, tier.skill, rng);
+      if (r.won) wins++;
+      m += r.margin;
+    }
+    return { key: tier.key, name: tier.name, runs, wins, winRate: wins / runs, avgMargin: m / runs };
+  });
+}
+
+/** 1-10 difficulty from tier win rates (average of the five tiers, weighted to the middle). */
+export function difficultyScore(tiers: TierResult[]): number {
+  const w = [1, 1.5, 2, 1.5, 1];
+  let a = 0;
+  let ws = 0;
+  tiers.forEach((t, i) => {
+    a += (1 - t.winRate) * (w[i] ?? 1);
+    ws += w[i] ?? 1;
+  });
+  return Math.round((1 + 9 * (a / ws)) * 10) / 10;
 }
 
 // ---------------------------------------------------------------------------

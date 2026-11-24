@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { CleanLevelData, LevelType } from '../types/level';
-import { AuditIssue, BotSummary, botEstimate, layoutSimilarity, woolTotals } from '../utils/levelAudit';
+import { AuditIssue, TierResult, botTiers, difficultyScore, layoutSimilarity, woolTotals } from '../utils/levelAudit';
+import { LEVEL_NOTES } from '../data/levelNotes';
 import { sounds } from '../utils/audio';
 import { Bot, ClipboardCopy } from 'lucide-react';
 
@@ -225,7 +226,7 @@ const CheckPane: React.FC<{
   onOpenLevel: (index: number) => void;
 }> = ({ levelData, levels, activeIndex, issues, onShowBoxes, onOpenLevel }) => {
   // The result is kept with the level it was run on; a new or edited level shows no stale result.
-  const [botRun, setBotRun] = useState<{ level: CleanLevelData; summary: BotSummary } | null>(null);
+  const [botRun, setBotRun] = useState<{ level: CleanLevelData; summary: TierResult[] } | null>(null);
   const [running, setRunning] = useState(false);
   const bot = botRun && botRun.level === levelData ? botRun.summary : null;
 
@@ -242,7 +243,7 @@ const CheckPane: React.FC<{
   const runBot = () => {
     setRunning(true);
     window.setTimeout(() => {
-      setBotRun({ level: levelData, summary: botEstimate(levelData, 40) });
+      setBotRun({ level: levelData, summary: botTiers(levelData, 30) });
       setRunning(false);
     }, 20);
   };
@@ -265,39 +266,47 @@ const CheckPane: React.FC<{
         ))}
       </ul>
 
+      {LEVEL_NOTES[levelData.levelId] && (
+        <>
+          <h3>Design note</h3>
+          <p>
+            <b>{LEVEL_NOTES[levelData.levelId].name}</b>
+            <br />
+            <span className="hint">{LEVEL_NOTES[levelData.levelId].challenge}</span>
+          </p>
+        </>
+      )}
+
       <h3>Difficulty (bot)</h3>
       <p className="hint">
-        A simple bot plays the level 40 times with some randomness. It is weaker than a careful player, so a low win
-        rate means hard, and 0 wins usually means the level cannot be finished.
+        Five bots, from a very good player to a very weak one, play the level 30 times each with the Play test rules.
+        They differ in reaction time, randomness, planning (looking one move ahead, not parking a color twice) and
+        patience with colors still in the fog. Difficulty 1 = every bot wins, 10 = no bot wins.
       </p>
       <div className="btns">
         <button className="btn primary" onClick={runBot} disabled={running}>
-          <Bot /> {running ? 'Playing…' : bot ? 'Run again' : 'Run bot (40 games)'}
+          <Bot /> {running ? 'Playing…' : bot ? 'Run again' : 'Run bots (5 × 30 games)'}
         </button>
       </div>
       {bot && (
         <table className="stats" style={{ marginTop: 10 }}>
           <tbody>
+            {bot.map((t) => (
+              <tr key={t.key}>
+                <td>{t.name}</td>
+                <td style={{ color: t.winRate === 0 ? 'var(--bad)' : t.winRate < 0.6 ? 'var(--warn)' : 'var(--ok)' }}>
+                  {Math.round(t.winRate * 100)}% ({t.wins}/{t.runs})
+                </td>
+              </tr>
+            ))}
             <tr>
-              <td>Wins</td>
-              <td style={{ color: bot.wins === 0 ? 'var(--bad)' : bot.wins < bot.runs * 0.75 ? 'var(--warn)' : 'var(--ok)' }}>
-                {bot.wins}/{bot.runs}
+              <td>
+                <b>Difficulty</b>
+              </td>
+              <td>
+                <b>{difficultyScore(bot)}</b> / 10
               </td>
             </tr>
-            <tr>
-              <td>Track left before the robot, best game</td>
-              <td>{Math.max(0, bot.bestMargin).toFixed(2)}</td>
-            </tr>
-            <tr>
-              <td>Average game time</td>
-              <td>{bot.avgTime.toFixed(0)} s</td>
-            </tr>
-            {bot.typicalLoss && (
-              <tr>
-                <td>Most common loss</td>
-                <td>{bot.typicalLoss}</td>
-              </tr>
-            )}
           </tbody>
         </table>
       )}
