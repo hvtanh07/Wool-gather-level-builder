@@ -408,6 +408,26 @@ The 8 official wool color IDs and their hex assignments:
 
 ---
 
+### 5.8 Bot Skill Tiers & Difficulty (`src/utils/levelAudit.ts`)
+`botTiers(level, runs)` plays the level with five bots (`BOT_TIERS`), from a very good player to a very weak one.
+They use the Play test rules and differ in:
+- **Reaction time** (`tapDelay`, 0.35 s to 1.5 s between taps) and **randomness** (`temperature`).
+- **Planning** (`lookahead`): values a box by the needed boxes it frees, and does not park a second box of a color whose open wool is already taken.
+- **Patience** (`discipline`): chance to wait instead of parking a box whose color is still in the fog.
+- **Ice** (`smartIce`): breaks ice on purpose when nothing useful is free.
+
+`difficultyScore(tiers)` turns the five win rates into 1–10 (1 = every bot wins, 10 = none). The Check tab shows both.
+Under the tool's rules the dragon is slow, so even the weakest bot wins most of the original Normal levels (score about 1).
+Read the score as relative between levels, not as the real in-game win rate.
+`npx tsx scripts/tiers.ts` prints the tiers for every level.
+
+### 5.9 Level Redesign Scripts (`scripts/redesign/`)
+Used on 2026-11-24 to redesign the broken, too-hard and look-alike levels.
+- `specs.ts`: one spec per level: shape parts (masks + box orientation + arrow policy), tunnels, conveyors, ice, color count, dragon chunk size, target difficulty, and the level's name and challenge.
+- `gen.ts`: fills the shapes with game-size boxes, keeps clear of tunnel mouths and conveyor lanes, flips arrows until every box, bus and belt box can leave, places ice only where some box can hit it, then builds the dragon from a play order (`sigma` = order noise, `rev` = how much the dragon asks for deep boxes first).
+- `tune.ts [ids]`: builds candidates per spec and keeps the one closest to the target score (very good bot must still win ≥ 90–95%). Writes `out/<id>.json` and `.svg`.
+- `finalize.ts`: writes the tuned levels into `src/data/levelPack.ts` (sheet format: track ID, no catPositions), writes `src/data/levelNotes.ts`, and prints a report for all levels.
+
 ## 6. How to Run, Build & Host
 
 ### Local Development

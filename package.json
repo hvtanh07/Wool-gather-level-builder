@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "audit": "npx -y tsx scripts/audit-levels.ts"
+    "audit": "npx -y tsx scripts/audit-levels.ts",
+    "tiers": "npx -y tsx scripts/tiers.ts"
   },
   "dependencies": {
     "canvas-confetti": "^1.9.4",
