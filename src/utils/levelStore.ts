@@ -4,9 +4,22 @@ import { normalizeCleanLevel } from './levelIO';
 import { LEVEL_NOTES } from '../data/levelNotes';
 
 const STORAGE_KEY = 'wool-gather-level-list-v1';
-// Bump when the built-in pack changes. A list saved with an older pack gets the redesigned levels
-// swapped in (other levels and edits stay); the old list is kept under a backup key.
-const PACK_VERSION = '2026-11-24';
+// Bump when the built-in pack changes and add the changed level ids to PACK_CHANGES. A list saved
+// with an older pack gets those levels swapped in from the pack (other levels and edits stay); the
+// old list is kept under a backup key.
+const PACK_VERSION = '2026-11-24b';
+const PACK_CHANGES: { version: string; levelIds: number[] }[] = [
+  // Redesign of broken, too hard and look-alike levels
+  { version: '2026-11-24', levelIds: Object.keys(LEVEL_NOTES).map(Number).filter((id) => LEVEL_NOTES[id].redesigned) },
+  // Boxes pushed apart so none overlap
+  { version: '2026-11-24b', levelIds: [1, 6, 16, 17, 36] },
+];
+
+function changedSince(savedVersion: string | undefined): Set<number> {
+  const ids = new Set<number>();
+  for (const c of PACK_CHANGES) if (!savedVersion || savedVersion < c.version) c.levelIds.forEach((id) => ids.add(id));
+  return ids;
+}
 
 export interface LevelListState {
   levels: CleanLevelData[];
@@ -29,9 +42,8 @@ export function loadLevelList(): LevelListState {
         if (saved.packVersion !== PACK_VERSION) {
           localStorage.setItem(`${STORAGE_KEY}-backup-${saved.packVersion ?? 'old'}`, raw);
           const pack = getDefaultLevelPack();
-          levels = levels.map((l) =>
-            LEVEL_NOTES[l.levelId]?.redesigned ? pack.find((p) => p.levelId === l.levelId) ?? l : l
-          );
+          const changed = changedSince(saved.packVersion);
+          levels = levels.map((l) => (changed.has(l.levelId) ? pack.find((p) => p.levelId === l.levelId) ?? l : l));
         }
         const activeIndex = Math.min(Math.max(0, saved.activeIndex | 0), levels.length - 1);
         return { levels, activeIndex };

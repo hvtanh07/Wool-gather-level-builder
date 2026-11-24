@@ -62,10 +62,10 @@ function tunnelBody(t: TunnelSetup): BoxItem {
   return { id: -t.id * 100, x: t.x, z: t.z, angle: t.angle, numType: 'Box6', capacity: 0, color: 0 };
 }
 
-// World units. Below 0.02 is rounding in the level data; 0.02-0.05 reads as touching in the
-// game (rounded corners), above 0.05 the boxes visibly overlap.
-const OVERLAP_TOLERANCE = 0.02;
-const OVERLAP_CLEAR = 0.05;
+// World units. Below 0.005 is rounding in the level data; any more shows as overlap in the editor
+// (0.005-0.02 is a warning, above 0.02 an error). scripts/fix-overlaps.ts pushes boxes apart.
+const OVERLAP_TOLERANCE = 0.005;
+const OVERLAP_CLEAR = 0.02;
 
 // ---------------------------------------------------------------------------
 // Static design checks
